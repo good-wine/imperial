@@ -44,6 +44,12 @@ deterministic risk + ACH + LLM narrative → STIX 2.1`.
 - Restart local API: `fuser -k 8001/tcp; bash /tmp/opencode/start_api.sh`
   (NEVER `pkill -f` with the server cmdline on the same line — it matches
   the invoking shell itself.)
+- Hot-sync Python-only changes into running containers (avoids a 30+ min
+  torch rebuild when PyPI is slow; image files are root-owned so extract
+  as root, then restart the service):
+  `tar -c --exclude=__pycache__ src ingestion security main.py worker.py \
+   | docker compose exec -T -u root api tar -x -C /app`
+  (repeat per service, then `docker compose restart api worker`).
 - Rate limit: `API_RATE_LIMIT_PER_MIN` (default 30, 0 disables).
 - Metrics: `GET /metrics` (verify/feedback/stix/osint counters).
 - Air-gap: bake `models/` (+`.sig` via `scripts/sign_models.py`), set
