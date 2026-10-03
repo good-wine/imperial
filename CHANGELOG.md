@@ -4,6 +4,15 @@ All notable changes to the Provenance Engine follow
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) versioning
 (`MAJOR.MINOR.PATCH` on `pyproject.toml`).
 
+## [4.4.0] - 2026-10-03
+
+### Added
+- Multilingual dashboard (EN/IT/FR/ES, zero new dependencies):
+  `dashboard/i18n.py` with English-fallback contract, sidebar language
+  selector, `DASHBOARD_LANG` deployment default (wired through compose).
+- `tests/test_i18n.py`: key parity, placeholder consistency, fallback and
+  invariant (TLP/verdict codes never translated) enforcement.
+
 ## [4.3.0] - 2026-10-03
 
 ### Added

@@ -71,7 +71,7 @@ Quality bars (enforced): `ruff check` + `ruff format --check` clean,
 │   │   └── llm_engine.py    # fusion scoring + narrative + STIX
 │   ├── ...                  # v2 modules unchanged (c2pa/forensic/context/llm)
 ├── security/signature.py    # Ed25519 gate before every model load
-├── dashboard/app.py         # Streamlit HITL console
+├── dashboard/app.py         # Streamlit HITL console (EN/IT/FR/ES via i18n.py)
 ├── scripts/sign_models.py   # offline model provisioning
 ├── scripts/eval_metrics.py  # adversarial eval harness
 ├── Dockerfile               # targets: api | worker | dashboard | cli (multi-arch)

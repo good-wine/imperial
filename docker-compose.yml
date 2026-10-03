@@ -144,6 +144,7 @@ services:
     env_file: [.env]
     environment:
       API_BASE: http://api:8000
+      DASHBOARD_LANG: ${DASHBOARD_LANG:-en}
     ports: ["8501:8501"]
     depends_on:
       api: {condition: service_healthy}
