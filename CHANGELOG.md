@@ -4,8 +4,29 @@ All notable changes to the Provenance Engine follow
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) versioning
 (`MAJOR.MINOR.PATCH` on `pyproject.toml`).
 
-## [4.1.0] - 2026-10-03
+## [4.2.0] - 2026-10-03
 
+### Added
+- Real spectral synthesis head: shared `spectral_profile()` feature,
+  `scripts/train_spectral_head.py` (bootstrap corpus, 0.70 AUC refusal
+  gate, sklearn↔ONNX parity check), `input: spectral32` dispatch in the
+  forensic ensemble, Ed25519-signed and registered.
+- Ground-truth AL bootstrap (`scripts/seed_feedback.py`, 24 construction-
+  labeled rows) closing the loop into `calibrate_ensemble.py` (CV 0.78).
+- Redis sliding-window rate limiting (`src/ratelimit.py`) with memory
+  fallback; shared budget across replicas.
+- Hypothesis property tests (`tests/test_fuzz.py`) for all hostile-input
+  parsers (JUMBF/MP4/PNG/seed-JSON/hamming/C2PA entry).
+- DR + SSO: `scripts/backup_volumes.sh` (pg_dump, Qdrant snapshots, RDB),
+  `config/keycloak_realm.json` template.
+- Tests: 56 → 66 passing; coverage 61% → 62%.
+
+### Fixed
+- Clean gradient scored above spliced image by v1 head (out-of-domain
+  pristine class) → scene-invariant high-pass texture feature.
+- `pyproject.toml` version now tracks CHANGELOG (4.2.0).
+
+## [4.1.0] - 2026-10-03
 ### Added
 - `tests/test_units.py`: 14 offline unit tests (SIEM shapes, OIDC RS256
   roundtrip + rejections, RSS/Atom parsing incl. entity-attack, Telegram

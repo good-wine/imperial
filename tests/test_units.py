@@ -467,6 +467,59 @@ def _gradient_png(name: str) -> Path:
     return p
 
 
+def test_rate_limiter_memory_and_redis_stub():
+    from src.ratelimit import RateLimiter
+
+    assert RateLimiter(0).allowed("k") is True  # 0 disables
+    m = RateLimiter(3)
+    assert [m.allowed("k") for _ in range(3)] == [True, True, True]
+    assert m.allowed("k") is False
+    assert m.allowed("other") is True  # per-key budgets
+
+    class _Pipe:
+        def __init__(self, parent):
+            self.p = parent
+
+        def zremrangebyscore(self, *a):
+            return self
+
+        def zadd(self, *a):
+            return self
+
+        def zcard(self, k):
+            self.p.calls.append(k)
+            return self
+
+        def expire(self, *a):
+            return self
+
+        def execute(self):
+            self.p.n += 1
+            return [None, None, self.p.n, None]
+
+    class _Stub:
+        def __init__(self):
+            self.n = 0
+            self.calls = []
+
+        def pipeline(self, transaction=True):
+            return _Pipe(self)
+
+    stub = _Stub()
+    a, b = RateLimiter(2), RateLimiter(2)
+    a._client, b._client = stub, stub  # shared budget across replicas
+    assert a.allowed("k") and b.allowed("k") and not a.allowed("k")
+    assert stub.calls  # went through Redis, not memory
+
+    class _Down:
+        def pipeline(self, *a, **k):
+            raise ConnectionError("no broker")
+
+    d = RateLimiter(1)
+    d._client = _Down()
+    assert d.allowed("k") is True and d.allowed("k") is False  # fail-open to memory
+
+
 def test_engine_wrappers_unsigned():
     from src.db.store import InMemoryEventStore
     from src.engines.c2pa_engine import run_c2pa_engine

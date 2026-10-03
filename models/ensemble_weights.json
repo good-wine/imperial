@@ -1,0 +1,28 @@
+{
+  "features": [
+    "ela_score",
+    "fft_score",
+    "blockiness",
+    "dct_double_jpeg",
+    "noise_score",
+    "histogram_anomaly",
+    "face_anomaly"
+  ],
+  "weights": {
+    "ela_score": 0.0,
+    "fft_score": -0.3309,
+    "blockiness": -0.3793,
+    "dct_double_jpeg": -1.654,
+    "noise_score": 0.0728,
+    "histogram_anomaly": 0.7166,
+    "face_anomaly": 0.0
+  },
+  "intercept": 1.1434,
+  "train_auc": 1.0,
+  "cv_auc": 0.78,
+  "n": 24,
+  "classes": {
+    "0": 12,
+    "1": 12
+  }
+}

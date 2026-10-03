@@ -21,6 +21,14 @@
       "task": "embedding",
       "version": "bring-your-own-v1",
       "notes": "CLIP ViT-B/32 image tower (512-d) for semantic decontextualization search. See src/embeddings.py."
+    },
+    {
+      "name": "spectral-lr",
+      "path": "models/spectral_lr.onnx",
+      "task": "synthetic",
+      "input": "spectral32",
+      "version": "bootstrap-v1-auc0.738-n120",
+      "notes": "LR on shared 32-bin radial spectral profile; bootstrap corpus (labels from construction). Weak signal, blended 35%. Replace with FaceForensics++/DFDC head for operations."
     }
   ]
 }

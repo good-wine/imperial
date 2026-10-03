@@ -77,13 +77,13 @@ def analyze_forensics(file_path: str | Path, max_frames: int | None = None) -> F
         if not frames:
             result.errors.append("no decodable frames found")
             return result
-        sessions, versions = _load_registry_sessions()
+        sessions, versions, specs = _load_registry_sessions()
         result.onnx_used = bool(sessions)
         result.model_versions = versions
         prev_small = None
         flickers: list[float] = []
         for idx, (img, ts) in enumerate(frames):
-            metrics = _score_frame(cv2, img, idx, ts, sessions, device)
+            metrics = _score_frame(cv2, img, idx, ts, sessions, device, specs)
             result.frames.append(metrics)
             small = _small_gray(cv2, img)
             if prev_small is not None:
@@ -188,6 +188,7 @@ def _score_frame(
     ts: float | None,
     sessions: dict[str, object],
     device: str,
+    specs: dict[str, str] | None = None,
 ) -> FrameMetrics:
     import cv2 as _cv2
 
@@ -203,7 +204,7 @@ def _score_frame(
     dct_hint = _dct_double_jpeg_hint(gray)
     face_count, face_anom = _face_region_anomaly(_cv2, img, gray)
 
-    learned = _registry_scores(sessions, img)
+    learned = _registry_scores(sessions, img, specs)
     handcrafted = (
         0.22 * ela
         + 0.18 * fft_s
@@ -286,6 +287,42 @@ def _histogram_anomaly(cv2: object, img: np.ndarray) -> float:
     hist /= hist.sum() + 1e-6
     smooth = np.convolve(hist, np.ones(5) / 5.0, mode="same")
     return float(np.clip(float(np.abs(hist - smooth).sum()) / 0.6, 0.0, 1.0))
+
+
+def spectral_profile(gray: np.ndarray, bins: int = 32) -> np.ndarray:
+    """Radial spectral profile of the HIGH-PASS residual.
+
+    Scene content (gradients, skies, flat memes) lives in low frequencies and
+    would dominate the curve; subtracting a Gaussian-blurred copy keeps only
+    sensor/processing texture — noise grain, JPEG lattice, synthesis
+    checkerboarding — making the shape scene-invariant and comparable across
+    captures. Shared between training (`scripts/train_spectral_head.py`) and
+    inference (`_registry_scores` with `input: spectral32` heads), so no
+    train/serve skew is possible by construction.
+    Always returns a finite (bins,) float32 vector (zeros on degenerate input).
+    """
+    try:
+        import cv2 as _cv2
+
+        g = gray.astype(np.float32)
+        low = _cv2.GaussianBlur(g, (0, 0), 2.0)
+        tex = g - low
+        if float(np.abs(tex).mean()) < 0.05:
+            return np.zeros(bins, dtype=np.float32)  # textureless: no signal
+        h, w = tex.shape
+        small = tex[:: max(1, h // 256), :: max(1, w // 256)]
+        f = np.fft.rfft2(small - small.mean())
+        mag = np.log1p(np.abs(f)).astype(np.float64)
+        yy, xx = np.mgrid[0 : mag.shape[0], 0 : mag.shape[1]]
+        r = np.sqrt(yy**2 + xx**2)
+        rmax = float(np.max(r)) + 1e-9
+        idx = np.clip((r / rmax * bins).astype(int), 0, bins - 1)
+        prof = np.array([mag[idx == b].mean() for b in range(bins)], dtype=np.float64)
+        prof = prof / (float(np.max(prof)) + 1e-9)  # scale-invariant shape
+        out = prof.astype(np.float32)
+        return np.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
+    except Exception:
+        return np.zeros(bins, dtype=np.float32)
 
 
 def _fft_artifact_score(gray: np.ndarray) -> float:
@@ -434,6 +471,22 @@ def _write_ela_heatmap(cv2: object, img: np.ndarray, src: Path) -> str | None:
 
 _CALIB = None
 _CALIB_LOADED = False
+_CALIB_PATH = ""  # resolved lazily so tests can point elsewhere via env
+
+
+def _calib_path() -> Path:
+    import os as _os
+
+    global _CALIB_PATH
+    if not _CALIB_PATH:
+        _CALIB_PATH = _os.getenv("ENSEMBLE_WEIGHTS_PATH", "models/ensemble_weights.json")
+    return Path(_CALIB_PATH)
+
+
+def reset_calibration_cache() -> None:
+    """Drop cached weights (tests, or hot-reload after re-calibration)."""
+    global _CALIB, _CALIB_LOADED, _CALIB_PATH
+    _CALIB, _CALIB_LOADED, _CALIB_PATH = None, False, ""
 
 
 def _calibrated_score(feats: dict[str, float]) -> float | None:
@@ -443,7 +496,7 @@ def _calibrated_score(feats: dict[str, float]) -> float | None:
     if not _CALIB_LOADED:
         _CALIB_LOADED = True
         try:
-            doc = json.loads(Path("models/ensemble_weights.json").read_text(encoding="utf-8"))
+            doc = json.loads(_calib_path().read_text(encoding="utf-8"))
             if isinstance(doc.get("weights"), dict) and doc.get("features"):
                 _CALIB = doc
                 log.info(
@@ -474,14 +527,16 @@ def _torch_available() -> bool:
         return False
 
 
-def _load_registry_sessions() -> tuple[dict[str, object], dict[str, str]]:
+def _load_registry_sessions() -> tuple[dict[str, object], dict[str, str], dict[str, str]]:
     """Load every model in `models/registry.json` that exists on disk.
 
-    Registry entries: {"name","path","task": deepfake|synthetic,"version"}.
-    Legacy single-path `ONNX_MODEL_PATH` is honored as `deepfake-legacy`.
+    Registry entries: {"name","path","task": deepfake|synthetic,"version",
+    "input": rgb224|spectral32}. Legacy single-path `ONNX_MODEL_PATH` is
+    honored as `deepfake-legacy`. Returns (sessions, versions, input-specs).
     """
     sessions: dict[str, object] = {}
     versions: dict[str, str] = {}
+    specs: dict[str, str] = {}
     candidates: list[dict[str, str]] = []
     reg = Path(SETTINGS.model_registry_path)
     if reg.is_file():
@@ -525,21 +580,34 @@ def _load_registry_sessions() -> tuple[dict[str, object], dict[str, str]]:
             sess = ort.InferenceSession(str(mp), providers=get_onnx_providers())
             sessions[cand.get("name", mp.stem)] = sess
             versions[cand.get("name", mp.stem)] = cand.get("version", "unknown")
+            specs[cand.get("name", mp.stem)] = cand.get("input", "rgb224")
             log.info("forensic: ONNX model loaded: %s (%s)", mp, cand.get("task"))
         except ImportError:
             log.info("forensic: onnxruntime missing, skipping learned heads")
             break
         except Exception as exc:
             log.warning("forensic: ONNX load failed for %s (%s)", mp, exc)
-    return sessions, versions
+    return sessions, versions, specs
 
 
-def _registry_scores(sessions: dict[str, object], img: np.ndarray) -> float | None:
+def _registry_scores(
+    sessions: dict[str, object], img: np.ndarray, specs: dict[str, str] | None = None
+) -> float | None:
     if not sessions:
         return None
     scores = []
-    for sess in sessions.values():
-        s = _onnx_score(sess, img)
+    gray = None
+    for name, sess in sessions.items():
+        spec = (specs or {}).get(name, "rgb224")
+        if spec == "spectral32":
+            # Spectral heads consume the shared 32-bin radial profile, not pixels.
+            if gray is None:
+                import cv2 as _cv2
+
+                gray = _cv2.cvtColor(img, _cv2.COLOR_BGR2GRAY)
+            s = _onnx_vector_score(sess, spectral_profile(gray))
+        else:
+            s = _onnx_score(sess, img)
         if s is not None:
             scores.append(s)
     if not scores:
@@ -561,4 +629,24 @@ def _onnx_score(sess: Any, img: np.ndarray) -> float | None:
         return float(1.0 / (1.0 + np.exp(-logit))) if not (0.0 <= logit <= 1.0) else logit
     except Exception as exc:
         log.warning("forensic: ONNX inference failed (%s)", exc)
+        return None
+
+
+def _onnx_vector_score(sess: Any, vec: np.ndarray) -> float | None:
+    """Score a precomputed feature vector (e.g. spectral32 profile).
+
+    The ONNX graph maps the vector to a single logit/probability; same
+    sigmoid convention as `_onnx_score`. Returns None on any failure.
+    """
+    try:
+        arr = np.asarray(vec, dtype=np.float32).reshape(1, -1)
+        outs = sess.run(None, {sess.get_inputs()[0].name: arr})
+        for o in outs:  # prefer the class-probability tensor when present
+            a = np.asarray(o)
+            if a.ndim == 2 and a.shape[1] == 2:
+                return float(np.clip(a[0, 1], 0.0, 1.0))
+        logit = float(np.asarray(outs[0]).ravel()[0])
+        return float(1.0 / (1.0 + np.exp(-logit))) if not (0.0 <= logit <= 1.0) else logit
+    except Exception as exc:
+        log.warning("forensic: ONNX vector inference failed (%s)", exc)
         return None

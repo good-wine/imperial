@@ -173,9 +173,8 @@ _UPLOAD_FLUSH_BYTES = 8 << 20
 
 @dataclass
 class _ApiCtx:
-    """Shared mutable API state: rate-limit buckets + operational counters."""
+    """Shared mutable API state: rate limit + operational counters."""
 
-    buckets: dict[str, list[float]] = field(default_factory=dict)
     rate_limit: int = 30
     metrics: dict[str, int] = field(
         default_factory=lambda: {
@@ -252,23 +251,20 @@ def _require_clearance(clearance: str, record_tlp: str, action: str) -> None:
 
 
 def _register_middleware(api: FastAPI, ctx: _ApiCtx) -> None:
-    """Per-IP token bucket on ingestion-grade endpoints (DoS/abuse shield)."""
+    """Shared-budget rate limiting on ingestion-grade endpoints (DoS shield)."""
+    from src.ratelimit import RateLimiter
+
+    limiter = RateLimiter(ctx.rate_limit, os.getenv("CELERY_BROKER_URL", ""))
 
     @api.middleware("http")
     async def _rate_limit(request, call_next):
-        import time as _t
-
         guarded = request.url.path.startswith(
             ("/api/v1/verify", "/api/v1/osint", "/api/v1/feedback")
         )
-        if guarded and ctx.rate_limit > 0:
+        if guarded:
             ip = request.client.host if request.client else "?"
-            now = _t.time()
-            hits = [h for h in ctx.buckets.get(ip, []) if now - h < 60]
-            if len(hits) >= ctx.rate_limit:
+            if not limiter.allowed(f"rl:{ip}"):
                 return JSONResponse({"detail": "rate limit exceeded"}, status_code=429)
-            hits.append(now)
-            ctx.buckets[ip] = hits[-ctx.rate_limit :]
         return await call_next(request)
 
 
