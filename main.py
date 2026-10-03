@@ -526,6 +526,31 @@ def _register_osint(api: FastAPI, ctx: _ApiCtx) -> None:
         ctx.metrics["osint_polls"] += 1
         return JSONResponse({"created": len(created), "cases": created})
 
+    @api.post("/api/v1/admin/purge")
+    def admin_purge(
+        clearance: str = "TLP:CLEAR",
+        x_tlp: str | None = Header(None, alias="X-TLP"),
+    ) -> JSONResponse:
+        """Manually trigger the TLP retention sweep (same code path as the
+        daily beat task). RED clearance required: deletion is irreversible,
+        so only the top tier may invoke it. Every deletion is audit-logged;
+        the audit trail itself is never purged."""
+        from src.database import get_repository
+
+        clr = _clearance(x_tlp, clearance)
+        _require_clearance(clr, "TLP:RED", "retention purge")
+        try:
+            from worker import purge_expired as _purge_task
+
+            if hasattr(_purge_task, "delay"):
+                task = _purge_task.delay()
+                return JSONResponse({"task_id": str(task.id), "status": "queued"})
+            out = _purge_task()  # eager single-node: fast local sweep, runs inline
+        except Exception as exc:
+            raise HTTPException(502, f"purge task failed: {exc}") from exc
+        get_repository().audit(actor="api", action="admin.purge", detail=dict(out))
+        return JSONResponse(out)
+
 
 def _render_siem_report(report_json: str, format: str) -> tuple[str, str]:
     """Parse + render a stored report to a SOC format (400 on bad format)."""
@@ -650,15 +675,12 @@ def _register_federated(api: FastAPI, ctx: _ApiCtx) -> None:
         clearance: str = "TLP:CLEAR", x_tlp: str | None = Header(None, alias="X-TLP")
     ) -> JSONResponse:
         """Anonymized IoB/IoC sharing: only TLP:CLEAR/GREEN records, PII stripped."""
+        from src.database import get_repository
+
         clr = _clearance(x_tlp, clearance)
         _require_clearance(clr, "TLP:GREEN", "federated sharing")
-        return JSONResponse(
-            {
-                "indicators": [],
-                "note": "wire live DB scan in deployment; demo returns empty set",
-                "clearance": clr,
-            }
-        )
+        indicators = get_repository().shareable_indicators(limit=200)
+        return JSONResponse({"indicators": indicators, "count": len(indicators), "clearance": clr})
 
 
 def build_api():

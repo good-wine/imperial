@@ -569,3 +569,32 @@ def test_cases_listing_tlp_omission_and_filters(tmp_path, monkeypatch):
             "/api/v1/cases", params={"clearance": "TLP:RED", "limit": 1, "offset": 1}
         ).json()
         assert page["returned"] == 1
+
+
+def test_admin_purge_gated_and_queued(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    import main
+
+    called = {}
+
+    class _Task:
+        id = "task-1"
+
+    def _fake_delay():
+        called["ran"] = True
+        return _Task()
+
+    class _Purge:
+        delay = staticmethod(lambda: _fake_delay())
+
+    import sys
+
+    monkeypatch.setitem(sys.modules, "worker", type("W", (), {})())
+    sys.modules["worker"].purge_expired = _Purge
+    with TestClient(main.app, raise_server_exceptions=False) as client:
+        denied = client.post("/api/v1/admin/purge", params={"clearance": "TLP:GREEN"})
+        assert denied.status_code == 403
+        ok = client.post("/api/v1/admin/purge", params={"clearance": "TLP:RED"})
+        assert ok.status_code == 200 and ok.json()["task_id"] == "task-1"
+        assert called.get("ran") is True

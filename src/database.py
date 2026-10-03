@@ -117,6 +117,12 @@ class Repository(Protocol):
     def pending_feedback(self) -> list[dict[str, Any]]: ...
     def mark_feedback_consumed(self, feedback_id: int) -> None: ...
     def closed_cases(self) -> list[dict[str, Any]]: ...
+    def shareable_indicators(self, limit: int = 200) -> list[dict[str, Any]]:
+        """Anonymized IoB/IoC rows: finished GREEN/CLEAR cases only, with all
+        identifying fields (uuid, filename, owner, notes) stripped at the
+        query layer — never selected, not merely redacted."""
+        ...
+
     def delete_case(self, case_uuid: str) -> list[str]:
         """Hard-delete a case and all dependents. Returns storage refs so the
         caller can wipe sealed files. Audit trail rows are RETAINED (custody
@@ -349,6 +355,31 @@ class StdlibSqliteRepo:
                         "SELECT case_uuid, tlp, status, created_at FROM cases "
                         "WHERE status IN ('done','failed')"
                     ).fetchall()
+                ]
+            )
+
+    def shareable_indicators(self, limit: int = 200) -> list[dict[str, Any]]:
+        limit = max(1, min(limit, 500))
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT c.sha256, c.tlp, c.created_at, ar.verdict, ar.risk_score, "
+                "ar.confidence FROM cases c JOIN analysis_results ar ON ar.case_id = c.id "
+                "WHERE c.status='done' AND c.tlp IN ('TLP:CLEAR','TLP:GREEN') "
+                "ORDER BY ar.id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            return _jsonable(
+                [
+                    {
+                        "type": "file-sha256",
+                        "value": r["sha256"],
+                        "verdict": r["verdict"],
+                        "risk_score": r["risk_score"],
+                        "confidence": r["confidence"],
+                        "tlp": r["tlp"],
+                        "assessed_at": r["created_at"],
+                    }
+                    for r in rows
                 ]
             )
 

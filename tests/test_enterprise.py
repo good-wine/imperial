@@ -6,6 +6,7 @@ ImageHash assert graceful SKIPPED instead of raising (honest degradation).
 
 from __future__ import annotations
 
+import json
 import shutil
 import wave
 from pathlib import Path
@@ -352,3 +353,36 @@ def test_api_import_safe_without_fastapi():
     assert hasattr(main, "analyze") and callable(main.analyze)
     # app is a FastAPI instance when installed, else None — never an import error.
     assert getattr(main, "app", None) is None or hasattr(main.app, "get")
+
+
+def test_shareable_indicators_omits_restricted_and_pii(tmp_path):
+    from src.database import StdlibSqliteRepo
+
+    repo = StdlibSqliteRepo(tmp_path / "fed.db")
+
+    def _done(tlp: str, sha: str) -> None:
+        c = repo.create_case(
+            filename="secret.png",
+            sha256=sha,
+            file_size=1,
+            mime_type="image/png",
+            tlp=tlp,
+            owner="analyst-x",
+            storage_ref="/tmp/x.png",
+        )
+        repo.set_status(c["case_uuid"], "done")
+        repo.save_result(
+            c["case_uuid"],
+            pipeline_version="3.0",
+            risk_score=60,
+            verdict="SUSPICIOUS",
+            confidence="Moderate",
+            report_json="{}",
+        )
+
+    _done("TLP:GREEN", "aa" * 32)
+    _done("TLP:RED", "bb" * 32)
+    rows = repo.shareable_indicators()
+    assert len(rows) == 1 and rows[0]["value"] == "aa" * 32
+    blob = json.dumps(rows)
+    assert "secret.png" not in blob and "analyst-x" not in blob and "bb" * 32 not in blob
