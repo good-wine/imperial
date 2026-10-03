@@ -111,6 +111,10 @@ The `proxy` service (Caddy, offline `tls internal` CA) exposes
 :443/:80. Two one-time client steps (see `scripts/trust-proxy-ca.sh`):
 
 ```bash
+# One-shot setup (idempotent): DNS check (+pkexec /etc/hosts if missing),
+# CA export + browser trust (no root), end-to-end HTTPS verify.
+bash scripts/setup-local-domain.sh
+# Manual equivalents if you prefer:
 # 1. trust the machine-local CA
 bash scripts/trust-proxy-ca.sh   # exports config/imperial-root.crt + prints next step
 # 2. name resolution (needs sudo, once)
