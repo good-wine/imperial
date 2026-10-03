@@ -1,0 +1,15 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.10
+    hooks:
+      - id: ruff
+        args: [check, src, ingestion, security, dashboard, scripts, main.py, worker.py, tests]
+      - id: ruff-format
+        args: [src, ingestion, security, dashboard, scripts, main.py, worker.py, tests]
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.18.2
+    hooks:
+      - id: mypy
+        files: ^(src|ingestion|security)/.*\.py$|^(main|worker)\.py$
+        args: [src, ingestion, security, main.py, worker.py]
+        additional_dependencies: []

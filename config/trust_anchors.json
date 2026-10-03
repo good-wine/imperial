@@ -1,0 +1,5 @@
+{
+  "$comment": "Air-gapped C2PA trust anchors. Pin SHA-256 fingerprints of approved signer certs (DER). Empty = trust-on-first-use disabled: manifests parse but never validate to True without c2pa-python + anchors.",
+  "fingerprints": [],
+  "example": "ab:cd:ef:12:34:56:78:90:ab:cd:ef:12:34:56:78:90:ab:cd:ef:12:34:56:78:90:ab:cd:ef:12:34:56:78:90"
+}

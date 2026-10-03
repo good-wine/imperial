@@ -1,0 +1,52 @@
+[
+  {
+    "event_id": "EVT-2019-NOTRE-DAME",
+    "description": "Notre-Dame cathedral fire, Paris — widely reused out of context for later blazes",
+    "event_date": "2019-04-15",
+    "source": "seed/reference",
+    "phash_hex": "ff00ff00ff00ff00",
+    "dhash_hex": "f0f0f0f0f0f0f0f0",
+    "pdq_hex": "ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00",
+    "clip_embedding": null
+  },
+  {
+    "event_id": "EVT-2020-BEIRUT",
+    "description": "Beirut port explosion — frequently recaptioned as unrelated strikes",
+    "event_date": "2020-08-04",
+    "source": "seed/reference",
+    "phash_hex": "aabbccddeeff0011",
+    "dhash_hex": "1122334455667788",
+    "pdq_hex": "aabbccddeeff0011aabbccddeeff0011aabbccddeeff0011aabbccddeeff0011",
+    "clip_embedding": null
+  },
+  {
+    "event_id": "EVT-2022-KYIV",
+    "description": "Kyiv TV tower area footage, March 2022 — reference for decontextualization tests",
+    "event_date": "2022-03-01",
+    "source": "seed/reference",
+    "phash_hex": "0f0f0f0ff0f0f0f0",
+    "dhash_hex": "00ff00ff00ff00ff",
+    "pdq_hex": "0f0f0f0ff0f0f0f00f0f0f0ff0f0f0f00f0f0f0ff0f0f0f00f0f0f0ff0f0f0f0",
+    "clip_embedding": null
+  },
+  {
+    "event_id": "EVT-2023-GAZA-ALAHLI",
+    "description": "Al-Ahli hospital blast imagery — contested attribution, high recaption risk",
+    "event_date": "2023-10-17",
+    "source": "seed/reference",
+    "phash_hex": "5a5a5aa55a5a5aa5",
+    "dhash_hex": "5a5aa55a5a5aa55a",
+    "pdq_hex": "5a5a5aa55a5a5aa55a5a5aa55a5a5aa55a5a5aa55a5a5aa55a5a5aa55a5a5aa5",
+    "clip_embedding": null
+  },
+  {
+    "event_id": "EVT-2024-VALENCIA-FLOOD",
+    "description": "Valencia DANA floods — old flood footage recirculated as live",
+    "event_date": "2024-10-29",
+    "source": "seed/reference",
+    "phash_hex": "c3c3c33cc3c3c33c",
+    "dhash_hex": "3c3cc3c33c3cc3c3",
+    "pdq_hex": "c3c3c33cc3c3c33cc3c3c33cc3c3c33cc3c3c33cc3c3c33cc3c3c33cc3c3c33c",
+    "clip_embedding": null
+  }
+]

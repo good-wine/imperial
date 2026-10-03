@@ -1,0 +1,13 @@
+[package]
+name = "provenance-jumbf"
+version = "0.1.0"
+edition = "2021"
+description = "Hierarchical JUMBF/C2PA box parser — Rust port of src/modules/c2pa_verify.py tree logic (Standard Stable, no unsafe)"
+
+[lib]
+name = "provenance_jumbf"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+
+[dev-dependencies]

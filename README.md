@@ -1,0 +1,105 @@
+# Geopolitical Media Provenance & Verification Engine — v3 Enterprise
+
+Offline-first intelligence platform for crisis-zone media: **C2PA crypto →
+multimodal forensics (video+audio+rPPG+lip-sync+MP4) → GEOINT solar/shadow →
+hybrid decontextualization → tradecraft report + STIX 2.1**, served over an
+async API (FastAPI + Celery/Redis), persisted in PostgreSQL/SQLAlchemy with
+ISO 27037 chain-of-custody, reviewed in a Streamlit HITL console.
+
+Standards: **C2PA 2.x**, **ICD-203/206 tradecraft**, **TLP 2.0**, **STIX 2.1**
+(MISP-ready IoB/IoC), **Ed25519** model signing, NREL solar geometry.
+
+v4 delta: **Qdrant** multimodal correlation + `GET /search/similar`, **Whisper**
+local STT/translation, **AI-watermark** screening (SynthID + ComfyUI/A1111/
+Midjourney metadata), **PII redaction** (face/plate blur on GREEN/CLEAR release),
+**OSINT ingestion** (Telegram + RSS -> cases), ONNX providers
+TensorRT/OpenVINO/CUDA/CoreML/CPU, AL retraining dataset trigger.
+
+v5 delta (this): **c2pa-python** real chain binding, **PRNU** sensor
+fingerprinting, **trust-anchor pinning** (`pin_trust_anchor.py` + cert
+carve-and-compare), **OIDC** analyst auth (Keycloak profile, optional),
+**SIEM export** (CEF/LEEF/ECS), **ensemble calibration** from feedback
+(sklearn LR → `models/ensemble_weights.json`), API **rate-limit** +
+`/metrics`, **Whisper small** + **CLIP ONNX** provisioning scripts.
+
+## Quickstart
+
+```bash
+make install            # venv + requirements + editable dev extras
+cp .env.example .env
+
+# Single-file triage (no services needed)
+.venv/bin/python main.py path/to/media.jpg
+.venv/bin/python main.py --self-test
+
+# Quality gate (same order as CI): format → lint → types → security → tests
+make gate
+make coverage           # tests + 55% coverage ratchet (never regress)
+make eval               # pristine vs spliced vs recaptioned harness
+make sbom               # supply-chain SBOM (Syft CycloneDX or pip freeze)
+
+# Full async stack
+docker compose up --build            # api + worker + redis + postgres
+docker compose --profile full up     # + ollama + dashboard + milvus + weaviate
+docker compose --profile gpu up      # NVIDIA worker overlay
+make run-api run-worker               # API + worker without docker
+API_BASE=http://127.0.0.1:8001 make run-dashboard   # analyst console
+.venv/bin/python scripts/sign_models.py --sign-all   # Ed25519 provision models
+```
+
+Quality bars (enforced): `ruff check` + `ruff format --check` clean,
+`mypy` zero errors on 42 files, `bandit -c .bandit` zero issues,
+`pytest` green with coverage ratchet, adversarial `eval_metrics` PASS.
+
+## Folder structure
+
+```
+.
+├── main.py                  # CLI triage + FastAPI v1 (uvicorn main:app)
+├── worker.py                # Celery tasks (eager fallback offline)
+├── src/
+│   ├── models.py            # SQLAlchemy ORM: cases/evidence/results/feedback/audit
+│   ├── database.py          # Postgres repo + stdlib-sqlite fallback, sealed fields
+│   ├── tlp.py               # TLP 2.0 enforcement + response redaction
+│   ├── stix.py              # STIX 2.1 bundle (deterministic IDs, MISP-ready)
+│   ├── audit.py             # hash-chained JSONL custody log
+│   ├── engines/
+│   │   ├── c2pa_engine.py   # manifest validity + signer + timestamp
+│   │   ├── forensics_engine.py # denoise/norm + MP4 atoms + audio vocoder + lip-sync + rPPG
+│   │   ├── geoint_engine.py # NREL solar position + shadow consistency
+│   │   ├── context_engine.py# hybrid phash/PDQ/CLIP wrapper + intel summary
+│   │   └── llm_engine.py    # fusion scoring + narrative + STIX
+│   ├── ...                  # v2 modules unchanged (c2pa/forensic/context/llm)
+├── security/signature.py    # Ed25519 gate before every model load
+├── dashboard/app.py         # Streamlit HITL console
+├── scripts/sign_models.py   # offline model provisioning
+├── scripts/eval_metrics.py  # adversarial eval harness
+├── Dockerfile               # targets: api | worker | dashboard | cli (multi-arch)
+└── docker-compose.yml       # api/worker(-gpu)/redis/postgres/ollama/dashboard
+```
+
+## Design decisions
+
+- **Tri-state C2PA + per-check detail**: `manifestFound/structureParse/
+  claimSignature/certChain/dataHash/timestamp` each PASS/FAIL/SKIPPED.
+  A `dataHash` FAIL floors risk at 80 — content changed post-signing.
+- **Deterministic score, LLM narrative**: auditable rules decide; the model
+  explains under a faithfulness self-check (verdict + factors echoed, else
+  an addendum is appended). Prompt-injection strings are sanitized pre-LLM.
+- **Hybrid retrieval**: pHash (≤8) for near-dups, PDQ-256 (≤48) for crops,
+  CLIP cosine (≥0.90) for semantic reuse. Fail-open availability,
+  fail-closed verdicts.
+- **Rust-ready**: `schemas.py` v2 dicts are the frozen wire format;
+  `rust/provenance-jumbf` already parses JUMBF with property tests.
+
+## Offline / Docker
+
+```bash
+docker build -t provenance-mvp .
+docker run --rm -v $PWD/reports:/app/reports provenance-mvp --self-test
+docker compose --profile full up     # + postgres/milvus/weaviate/ollama
+```
+
+`VECTOR_BACKEND=postgres` + `POSTGRES_DSN` for PG-HNSW, `LLM_BACKEND=ollama|jury`
++ `OLLAMA_MODEL=llama3.1:8b` for narratives, `TLP_MARKING` for handling caveat.
+Vendored ONNX files go in `models/` and are listed in `models/registry.json`.

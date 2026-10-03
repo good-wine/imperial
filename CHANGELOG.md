@@ -1,0 +1,61 @@
+# Changelog
+
+All notable changes to the Provenance Engine follow
+[Keep a Changelog](https://keepachangelog.com/en/1.0.0/) versioning
+(`MAJOR.MINOR.PATCH` on `pyproject.toml`).
+
+## [4.1.0] - 2026-10-03
+
+### Added
+- `tests/test_units.py`: 14 offline unit tests (SIEM shapes, OIDC RS256
+  roundtrip + rejections, RSS/Atom parsing incl. entity-attack, Telegram
+  gating, Jury semantics, Qdrant `:memory:` hybrid/correlation, fetch
+  choke point incl. size cap, ORM CRUD, RAG retrieval, engine wrappers).
+- Repo hygiene: `LICENSE` (Apache-2.0), `.gitignore`, `.editorconfig`,
+  `requirements.lock` (`make lock`), `CHANGELOG.md`, `make audit`
+  (pip-audit with documented nltk waiver), CI dependency-audit step.
+- `GET /metrics`, per-IP rate limiting, `docs/ARCHITECTURE.md`,
+  `docs/SECURITY.md` supply-chain section.
+
+### Fixed
+- `list.extend()` on async generator (Telegram scraper TypeError).
+- `FeedItem`/`TgMedia` variable confusion in OSINT pipeline.
+- `cert.fingerprint()` called with `hashlib` object instead of
+  `hashes.SHA256()` (c2pa_verify, pin_trust_anchor).
+- Centralized outbound fetch with scheme allowlist (`S310` class closed).
+
+### Security
+- `pip-audit`: 1 known vuln (nltk PYSEC-2026-3740, unpatched upstream,
+  unreachable from our code paths) — waived with justification in
+  `Makefile`/`docs/SECURITY.md`, re-audited in CI.
+
+## [4.0.0] - 2026-10-03
+
+### Added
+- `GET /api/v1/export/siem` (CEF/LEEF/ECS) and `GET /metrics`, per-IP
+  token-bucket rate limiting on ingestion endpoints.
+- PRNU sensor fingerprinting (`src/engines/prnu_engine.py`).
+- C2PA trust-anchor pinning (`scripts/pin_trust_anchor.py`, cert
+  carve-and-compare in `certChain` validation detail).
+- Optional OIDC analyst auth (`src/oidc.py`, Keycloak `sso` profile).
+- Ensemble calibration from HITL feedback (`scripts/calibrate_ensemble.py`).
+- Centralized outbound fetch (`src/security.fetch_url`, scheme allowlist).
+- Engineering: `ruff`/`mypy`/`bandit` clean, `Makefile` + CI + pre-commit,
+  coverage ratchet, SBOM script, lockfile.
+
+### Fixed
+- `list.extend()` on async generator in Telegram scraper (runtime TypeError).
+- `FeedItem`/`TgMedia` variable confusion in OSINT pipeline.
+- `cert.fingerprint(hashlib.sha256())` → `hashes.SHA256()` (correct API).
+- PostgreSQL triad: `lastrowid`, non-iterable adapter rows, naive JSON dump
+  of `datetime`, `consumed` boolean-vs-integer.
+- Bytes leak in JUMBF tree breaking `json.dumps` on JPEG/MP4 reports.
+
+## [3.0.0] - 2026-10-02
+
+### Added
+- Enterprise stack: FastAPI v1, Celery worker (eager fallback), SQLAlchemy
+  ORM + stdlib-sqlite fallback, Streamlit HITL console, OSINT ingestion
+  (Telegram/RSS), Qdrant correlation, Whisper STT, watermark screening,
+  PII redaction, GEOINT solar analysis, STIX 2.1, TLP enforcement,
+  Ed25519 model gating, Rust JUMBF crate.

@@ -1,0 +1,26 @@
+{
+  "$comment": "ONNX model registry. Add rows as detectors are vendored for air-gap. sha256 verified at load in future hardening pass.",
+  "models": [
+    {
+      "name": "deepfake-face",
+      "path": "models/deepfake.onnx",
+      "task": "deepfake",
+      "version": "bring-your-own-v1",
+      "notes": "Face-manipulation classifier (224x224, ImageNet norm, single logit or p). E.g. export of dima806/deepfake_vs_real_image_detection."
+    },
+    {
+      "name": "synthetic-diffusion",
+      "path": "models/synthetic_clip.onnx",
+      "task": "synthetic",
+      "version": "bring-your-own-v1",
+      "notes": "Diffusion/GAN image head (CLIP-linear-probe style, UnivFD). Blended 35% with handcrafted ensemble."
+    },
+    {
+      "name": "clip-image",
+      "path": "models/clip_image.onnx",
+      "task": "embedding",
+      "version": "bring-your-own-v1",
+      "notes": "CLIP ViT-B/32 image tower (512-d) for semantic decontextualization search. See src/embeddings.py."
+    }
+  ]
+}

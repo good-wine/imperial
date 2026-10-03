@@ -1,0 +1,41 @@
+# Python / virtualenvs
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Secrets & local config (never commit)
+.env
+*.pem
+*.key
+config/model_signing/ed25519.sk
+config/trust_anchors.local.json
+
+# Runtime state (recreated on boot)
+data/*.db
+data/*.db-journal
+data/cases/
+data/osint/
+data/tg_session*
+reports/*.report.json
+reports/*.report.md
+reports/audit.jsonl
+reports/sbom*.json
+models/*.onnx
+models/*.onnx.sig
+models/*.pt
+models/whisper/
+*.log
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+*.swp
