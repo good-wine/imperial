@@ -58,6 +58,9 @@ sbom:
 lock:
 	$(PY) -m pip freeze --exclude-editable > requirements.lock
 
+migrate:
+	$(PY) -m alembic upgrade head
+
 # Vulnerability audit. PYSEC-2026-3740 (nltk, unpatched upstream) is waived:
 # NLTK model-persistence APIs are unreachable from our code paths (no
 # caller-controlled model paths); re-audit on every nltk upgrade.

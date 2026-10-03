@@ -48,13 +48,29 @@ _SYSTEM = (
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 _INSTRUCTION = re.compile(
     r"(?i)\b(ignore (previous|prior|all) instructions|system prompt|you are now|"
-    r"disregard (the|all|previous)|jailbreak|do anything now)\b"
+    r"disregard (the|all|previous)|jailbreak|do anything now|"
+    # Exfiltration probes: reveal/repeat the hidden instructions.
+    r"(reveal|repeat|disclose|print|output|show) (me )?(your |the )?"
+    r"(system |hidden )?(prompt|instructions)|"
+    # Amnesia orders, EN + deployment languages (IT/FR/ES).
+    r"(forget (everything|all)|dimentica tutto|oublie tout|olvida todo)|"
+    # Ignore-orders, IT/FR/ES.
+    r"(ignora le istruzioni|ignora tutto|oublie les instructions|ignora las instrucciones)|"
+    # Role reassignment, EN + IT/FR/ES.
+    r"(you are now|sei ora|tu es maintenant|ahora eres)|"
+    # Developer-mode jailbreaks.
+    r"(developer mode|modalit[aà] sviluppatore|do anything now|DAN))\b"
 )
 
 
 def _sanitize(text: str, limit: int = 400) -> str:
-    """Neutralize prompt-injection + control chars in untrusted strings."""
-    t = _CONTROL.sub("", str(text or ""))
+    """Neutralize prompt-injection + control chars in untrusted strings.
+
+    Control chars become SPACES (not deletions): stripping glues adjacent
+    tokens together ("ok\\x00ignore" -> "okignore"), defeating the word
+    boundaries the instruction pattern relies on.
+    """
+    t = _CONTROL.sub(" ", str(text or ""))
     t = _INSTRUCTION.sub("[redacted-instruction]", t)
     return t[:limit]
 

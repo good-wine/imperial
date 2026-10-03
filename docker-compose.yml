@@ -102,6 +102,28 @@ services:
       postgres: {condition: service_healthy}
       api: {condition: service_healthy}
 
+  # Beat scheduler: OSINT poll (hourly :15) + retention sweep (daily 02:00).
+  # Single replica only — two beats would double-schedule.
+  beat:
+    build:
+      context: .
+      target: worker
+      args:
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
+    image: provenance-worker:latest
+    env_file: [.env]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-prov}:${POSTGRES_PASSWORD:-prov}@postgres:5432/${POSTGRES_DB:-provenance}
+      CELERY_BROKER_URL: redis://redis:6379/0
+    volumes:
+      - ./data:/app/data
+      - ./reports:/app/reports
+    command: ["celery", "-A", "worker.app", "beat", "--loglevel=info"]
+    depends_on:
+      redis: {condition: service_started}
+      worker: {condition: service_started}
+    profiles: ["full", "beat"]
+
   # GPU worker overlay: same image, NVIDIA runtime. Requires nvidia-docker.
   worker-gpu:
     extends: worker
@@ -153,6 +175,30 @@ services:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_ADMIN:-admin}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD:-change-me}
     ports: ["8180:8080"]
+    profiles: ["sso"]
+
+  # oauth2-proxy in front of the dashboard: Streamlit itself has no login,
+  # so the console is gated here when --profile sso is on. Public entry
+  # becomes :4180 (authenticated) instead of :8501 (direct).
+  # Provider config comes from env (see .env.example OIDC_*); empty values
+  # make oauth2-proxy itself refuse to start (fail closed, sso only).
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.6
+    command:
+      - --provider=oidc
+      - --oidc-issuer-url=${OIDC_ISSUER:-}
+      - --client-id=${OIDC_CLIENT_ID:-dashboard}
+      - --client-secret=${OIDC_CLIENT_SECRET:-}
+      - --cookie-secret=${OAUTH2_COOKIE_SECRET:-}
+      - --email-domain=*
+      - --upstream=http://dashboard:8501
+      - --http-address=0.0.0.0:4180
+      - --cookie-secure=false
+      - --pass-access-token=true
+      - --set-xauthrequest=true
+    ports: ["4180:4180"]
+    depends_on:
+      dashboard: {condition: service_started}
     profiles: ["sso"]
 
 volumes:

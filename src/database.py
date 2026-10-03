@@ -113,6 +113,13 @@ class Repository(Protocol):
     ) -> dict[str, Any]: ...
     def pending_feedback(self) -> list[dict[str, Any]]: ...
     def mark_feedback_consumed(self, feedback_id: int) -> None: ...
+    def closed_cases(self) -> list[dict[str, Any]]: ...
+    def delete_case(self, case_uuid: str) -> list[str]:
+        """Hard-delete a case and all dependents. Returns storage refs so the
+        caller can wipe sealed files. Audit trail rows are RETAINED (custody
+        log must survive the evidence it describes)."""
+        ...
+
     def audit(
         self, *, actor: str, action: str, case_uuid: str = "", detail: dict[str, Any] | None = None
     ) -> None: ...
@@ -305,6 +312,37 @@ class StdlibSqliteRepo:
     def mark_feedback_consumed(self, feedback_id: int) -> None:
         with self._conn() as conn:
             conn.execute("UPDATE feedback SET consumed=1 WHERE id=?", (feedback_id,))
+
+    def closed_cases(self) -> list[dict[str, Any]]:
+        """Finished cases (done/failed) with raw timestamps for retention sweeps."""
+        with self._conn() as conn:
+            return _jsonable(
+                [
+                    dict(r)
+                    for r in conn.execute(
+                        "SELECT case_uuid, tlp, status, created_at FROM cases "
+                        "WHERE status IN ('done','failed')"
+                    ).fetchall()
+                ]
+            )
+
+    def delete_case(self, case_uuid: str) -> list[str]:
+        with self._conn() as conn:
+            row = conn.execute("SELECT id FROM cases WHERE case_uuid=?", (case_uuid,)).fetchone()
+            if row is None:
+                return []
+            case_id = row["id"]
+            refs = [
+                r["storage_ref"]
+                for r in conn.execute(
+                    "SELECT storage_ref FROM evidence WHERE case_id=?", (case_id,)
+                ).fetchall()
+            ]
+            conn.execute("DELETE FROM feedback WHERE case_id=?", (case_id,))
+            conn.execute("DELETE FROM analysis_results WHERE case_id=?", (case_id,))
+            conn.execute("DELETE FROM evidence WHERE case_id=?", (case_id,))
+            conn.execute("DELETE FROM cases WHERE id=?", (case_id,))
+            return [str(r) for r in refs if r]
 
     def audit(
         self, *, actor: str, action: str, case_uuid: str = "", detail: dict[str, Any] | None = None

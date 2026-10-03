@@ -18,7 +18,10 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from src.database import Repository
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # /app in containers
 
@@ -35,15 +38,89 @@ except ImportError:
     _CELERY = False
 
 if _CELERY:
+    from celery.schedules import crontab
+
     app = Celery("provenance", broker=BROKER_URL, backend=BROKER_URL)
     app.conf.update(
         task_acks_late=True,
         worker_prefetch_multiplier=1,
         task_reject_on_worker_lost=True,
         timezone="UTC",
+        beat_schedule={
+            # PII hygiene: retention sweep daily; OSINT ingestion hourly.
+            "retention-sweep-daily": {
+                "task": "provenance.purge_expired",
+                "schedule": crontab(hour=2, minute=0),
+            },
+            "osint-poll-hourly": {
+                "task": "provenance.osint_poll",
+                "schedule": crontab(minute=15),
+            },
+        },
     )
 else:
     app = None
+
+
+# Retention policy (days) per TLP. RED never expires automatically — a human
+# reviewer must explicitly delete. Queued/running cases are never purged.
+RETENTION_DAYS = {
+    "TLP:CLEAR": int(os.getenv("RETENTION_DAYS_CLEAR", "30")),
+    "TLP:GREEN": int(os.getenv("RETENTION_DAYS_GREEN", "90")),
+    "TLP:AMBER": int(os.getenv("RETENTION_DAYS_AMBER", "365")),
+}
+
+
+def purge_expired_cases(repo: Repository | None = None) -> dict[str, Any]:
+    """Delete finished cases past their TLP retention window.
+
+    Evidence files are wiped from disk, dependents removed, and each deletion
+    is audit-logged. The audit trail itself is retained (custody log must
+    survive the evidence). Returns counts per outcome for the beat log.
+    """
+    import datetime as _dt
+
+    from src.database import get_repository
+
+    repo = repo or get_repository()
+    now = _dt.datetime.now(_dt.timezone.utc)
+    purged, kept, errors = [], [], []
+
+    def _age_days(ts: Any) -> float | None:
+        try:
+            dt = ts if isinstance(ts, _dt.datetime) else _dt.datetime.fromisoformat(str(ts))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=_dt.timezone.utc)
+            return (now - dt).total_seconds() / 86400.0
+        except Exception:
+            return None
+
+    for row in repo.closed_cases():
+        window = RETENTION_DAYS.get(str(row.get("tlp", "")).upper())
+        if window is None:  # RED / unknown: human decision only
+            kept.append(row.get("case_uuid"))
+            continue
+        age = _age_days(row.get("created_at"))
+        if age is None or age < window:
+            kept.append(row.get("case_uuid"))
+            continue
+        try:
+            for ref in repo.delete_case(str(row["case_uuid"])):
+                p = Path(ref)
+                if p.is_file() and str(p).startswith(("data/", "/app/data/", "/tmp/")):
+                    p.unlink(missing_ok=True)  # never follow refs outside case storage
+            repo.audit(
+                actor="retention",
+                action="case.purged",
+                case_uuid=str(row["case_uuid"]),
+                detail={"tlp": row.get("tlp"), "age_days": round(age, 1)},
+            )
+            purged.append(row.get("case_uuid"))
+        except Exception as exc:
+            log.warning("retention: purge failed %s (%s)", row.get("case_uuid"), exc)
+            errors.append(row.get("case_uuid"))
+    log.info("retention: purged=%d kept=%d errors=%d", len(purged), len(kept), len(errors))
+    return {"purged": purged, "kept": len(kept), "errors": errors}
 
 
 def _run_pipeline(
@@ -239,6 +316,11 @@ if _CELERY:
         from ingestion.pipeline import run_once
 
         return asyncio.run(run_once(owner))
+
+    @app.task(name="provenance.purge_expired")
+    def purge_expired() -> dict[str, Any]:
+        """Beat-scheduled retention sweep (daily per beat_schedule)."""
+        return purge_expired_cases()
 else:  # eager stand-ins with identical signatures
 
     def analyze_case(
@@ -262,6 +344,9 @@ else:  # eager stand-ins with identical signatures
         from ingestion.pipeline import run_once
 
         return asyncio.run(run_once(owner))
+
+    def purge_expired() -> dict[str, Any]:
+        return purge_expired_cases()
 
 
 def _maybe_trigger_retraining(repo) -> None:
