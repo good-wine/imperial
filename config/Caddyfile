@@ -1,0 +1,25 @@
+# Local edge: imperial.local over HTTPS (Caddy, fully offline).
+# TLS uses Caddy's internal CA (`tls internal`) — no ACME, no internet.
+# Trust it once per client (see scripts/trust-proxy-ca.sh), then:
+#   https://api.imperial.local  -> FastAPI
+#   https://app.imperial.local  -> Streamlit console
+{
+	skip_install_trust
+	servers {
+		metrics
+	}
+}
+
+api.imperial.local {
+	tls internal
+	reverse_proxy api:8000 {
+		header_up Host {host}
+	}
+}
+
+app.imperial.local {
+	tls internal
+	reverse_proxy dashboard:8501 {
+		header_up Host {host}
+	}
+}

@@ -118,7 +118,8 @@ services:
     volumes:
       - ./data:/app/data
       - ./reports:/app/reports
-    command: ["celery", "-A", "worker.app", "beat", "--loglevel=info"]
+    command: []
+    entrypoint: ["tini", "--", "celery", "-A", "worker.app", "beat", "--loglevel=info"]
     depends_on:
       redis: {condition: service_started}
       worker: {condition: service_started}
@@ -149,6 +150,24 @@ services:
     depends_on:
       api: {condition: service_healthy}
     profiles: ["full", "ui"]
+
+  # Edge proxy: imperial.local over HTTPS, fully offline via Caddy's
+  # internal CA (`tls internal`, no ACME). Binds host :80/:443 (docker
+  # daemon is root even for rootless clients). Name resolution still needs
+  # one manual step — /etc/hosts is not writable without sudo, so either:
+  #   sudo sh -c 'echo "127.0.0.1 imperial.local api.imperial.local app.imperial.local" >> /etc/hosts'
+  # or test immediately with: curl --resolve api.imperial.local:443:127.0.0.1 ...
+  # Trust the CA once per client with scripts/trust-proxy-ca.sh.
+  proxy:
+    image: caddy:2-alpine
+    volumes:
+      - ./config/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    ports: ["80:80", "443:443"]
+    depends_on:
+      api: {condition: service_healthy}
+      dashboard: {condition: service_started}
+    profiles: ["full", "edge"]
 
   milvus:
     image: milvusdb/milvus:v2.4.10
@@ -209,3 +228,4 @@ volumes:
   qdrant-data:
   milvus-data:
   weaviate-data:
+  caddy-data:

@@ -17,6 +17,7 @@ htmlcov/
 *.key
 config/model_signing/ed25519.sk
 config/trust_anchors.local.json
+config/imperial-root.crt
 
 # Runtime state (recreated on boot)
 data/*.db

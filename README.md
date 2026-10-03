@@ -103,3 +103,19 @@ docker compose --profile full up     # + postgres/milvus/weaviate/ollama
 `VECTOR_BACKEND=postgres` + `POSTGRES_DSN` for PG-HNSW, `LLM_BACKEND=ollama|jury`
 + `OLLAMA_MODEL=llama3.1:8b` for narratives, `TLP_MARKING` for handling caveat.
 Vendored ONNX files go in `models/` and are listed in `models/registry.json`.
+
+## Local domain with HTTPS (`imperial.local`)
+
+The `proxy` service (Caddy, offline `tls internal` CA) exposes
+`https://api.imperial.local` and `https://app.imperial.local` on host
+:443/:80. Two one-time client steps (see `scripts/trust-proxy-ca.sh`):
+
+```bash
+# 1. trust the machine-local CA
+bash scripts/trust-proxy-ca.sh   # exports config/imperial-root.crt + prints next step
+# 2. name resolution (needs sudo, once)
+sudo sh -c 'echo "127.0.0.1 imperial.local api.imperial.local app.imperial.local" >> /etc/hosts'
+# without sudo, verify immediately via SNI override:
+curl --resolve api.imperial.local:443:127.0.0.1 --cacert config/imperial-root.crt \
+  https://api.imperial.local/health
+```
