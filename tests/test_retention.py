@@ -59,3 +59,18 @@ def test_retention_purge_matrix(tmp_path):
     trail = repo.audit_for(old_green)
     assert any(a["action"] == "case.purged" for a in trail)
     assert any(a["action"] == "case.created" for a in trail)
+
+
+def test_prune_orphans_dry_run_and_guards(tmp_path):
+    from scripts.prune_orphans import find_orphans
+
+    d = tmp_path / "cases"
+    d.mkdir()
+    (d / "11111111-1111-4111-8111-111111111111").mkdir()
+    (d / "22222222-2222-4222-8222-222222222222").mkdir()
+    (d / "not-a-uuid").mkdir()
+    (d / "stray.txt").write_text("x")
+    orphans, skipped = find_orphans(d, {"11111111-1111-4111-8111-111111111111"})
+    assert [o.name for o in orphans] == ["22222222-2222-4222-8222-222222222222"]
+    assert skipped == ["not-a-uuid"]  # non-uuid names are never touched
+    assert (d / "stray.txt").is_file()  # files at top level are never touched

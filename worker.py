@@ -105,22 +105,81 @@ def purge_expired_cases(repo: Repository | None = None) -> dict[str, Any]:
             kept.append(row.get("case_uuid"))
             continue
         try:
+            wiped = 0
             for ref in repo.delete_case(str(row["case_uuid"])):
                 p = Path(ref)
                 if p.is_file() and str(p).startswith(("data/", "/app/data/", "/tmp/")):
                     p.unlink(missing_ok=True)  # never follow refs outside case storage
+                    wiped += 1
+            try:  # drop the now-empty case directory (best effort)
+                d = Path(f"data/cases/{row['case_uuid']}")
+                if d.is_dir() and not any(d.iterdir()):
+                    d.rmdir()
+            except Exception:
+                pass
             repo.audit(
                 actor="retention",
                 action="case.purged",
                 case_uuid=str(row["case_uuid"]),
-                detail={"tlp": row.get("tlp"), "age_days": round(age, 1)},
+                detail={"tlp": row.get("tlp"), "age_days": round(age, 1), "files": wiped},
             )
             purged.append(row.get("case_uuid"))
         except Exception as exc:
             log.warning("retention: purge failed %s (%s)", row.get("case_uuid"), exc)
             errors.append(row.get("case_uuid"))
-    log.info("retention: purged=%d kept=%d errors=%d", len(purged), len(kept), len(errors))
-    return {"purged": purged, "kept": len(kept), "errors": errors}
+    # Orphan reconciliation: case dirs on disk with no DB row (volume/DB drift).
+    # Report-only by default; PURGE_ORPHANS=1 wipes them (audited, files only).
+    orphans, orphans_removed = _reconcile_orphans(repo)
+    log.info(
+        "retention: purged=%d kept=%d errors=%d orphans=%d removed=%d",
+        len(purged),
+        len(kept),
+        len(errors),
+        len(orphans),
+        orphans_removed,
+    )
+    return {
+        "purged": purged,
+        "kept": len(kept),
+        "errors": errors,
+        "orphans": orphans,
+        "orphans_removed": orphans_removed,
+    }
+
+
+def _reconcile_orphans(repo: Repository) -> tuple[list[str], int]:
+    import os as _os
+
+    known = repo.all_case_uuids()
+    orphans = (
+        [d.name for d in Path("data/cases").iterdir() if d.is_dir() and d.name not in known]
+        if Path("data/cases").is_dir()
+        else []
+    )
+    removed = 0
+    if orphans and _os.getenv("PURGE_ORPHANS", "0") == "1":
+        for name in orphans:
+            if _rmtree_quiet(Path("data/cases") / name):
+                removed += 1
+    if orphans:
+        repo.audit(
+            actor="retention",
+            action="orphans.reported",
+            detail={"count": len(orphans), "removed": removed, "sample": orphans[:5]},
+        )
+    return orphans, removed
+
+
+def _rmtree_quiet(path: Path) -> bool:
+    """Best-effort recursive delete (isolated try so the sweep loop stays clean)."""
+    try:
+        import shutil as _sh
+
+        _sh.rmtree(path)
+        return True
+    except Exception as exc:
+        log.warning("retention: orphan rmtree failed %s (%s)", path.name, exc)
+        return False
 
 
 def _run_pipeline(

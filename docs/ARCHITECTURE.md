@@ -50,6 +50,10 @@ deterministic risk + ACH + LLM narrative → STIX 2.1`.
   `tar -c --exclude=__pycache__ src ingestion security main.py worker.py \
    | docker compose exec -T -u root api tar -x -C /app`
   (repeat per service, then `docker compose restart api worker`).
+- Case storage is NEVER touched by ad-hoc shell loops (an empty-expansion
+  class of error once deleted live rows' blobs). Orphan cleanup goes only
+  through `python scripts/prune_orphans.py` (dry-run default, explicit
+  `--execute --i-understand-that-this-deletes-evidence`, audited).
 - Rate limit: `API_RATE_LIMIT_PER_MIN` (default 30, 0 disables).
 - Metrics: `GET /metrics` (verify/feedback/stix/osint counters).
 - Air-gap: bake `models/` (+`.sig` via `scripts/sign_models.py`), set

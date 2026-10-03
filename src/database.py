@@ -117,6 +117,10 @@ class Repository(Protocol):
     def pending_feedback(self) -> list[dict[str, Any]]: ...
     def mark_feedback_consumed(self, feedback_id: int) -> None: ...
     def closed_cases(self) -> list[dict[str, Any]]: ...
+    def all_case_uuids(self) -> set[str]:
+        """Every known case UUID (for orphan-file reconciliation)."""
+        ...
+
     def shareable_indicators(self, limit: int = 200) -> list[dict[str, Any]]:
         """Anonymized IoB/IoC rows: finished GREEN/CLEAR cases only, with all
         identifying fields (uuid, filename, owner, notes) stripped at the
@@ -357,6 +361,12 @@ class StdlibSqliteRepo:
                     ).fetchall()
                 ]
             )
+
+    def all_case_uuids(self) -> set[str]:
+        with self._conn() as conn:
+            return {
+                str(r["case_uuid"]) for r in conn.execute("SELECT case_uuid FROM cases").fetchall()
+            }
 
     def shareable_indicators(self, limit: int = 200) -> list[dict[str, Any]]:
         limit = max(1, min(limit, 500))
