@@ -1,6 +1,6 @@
 [project]
 name = "provenance-engine"
-version = "4.2.0"
+version = "4.3.0"
 description = "Geopolitical Media Provenance & Verification Engine — offline-first intelligence platform for image/video/audio authenticity"
 readme = "README.md"
 license = { text = "Apache-2.0" }

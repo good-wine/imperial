@@ -4,6 +4,13 @@ All notable changes to the Provenance Engine follow
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) versioning
 (`MAJOR.MINOR.PATCH` on `pyproject.toml`).
 
+## [4.3.0] - 2026-10-03
+
+### Added
+- Retention purge per TLP with Celery beat schedule, Alembic migrations,
+  oauth2-proxy SSO gate for the dashboard, cosign keyless release workflow,
+  red-team suite for the LLM guardrail, Redis sliding-window rate limiting.
+
 ## [4.2.0] - 2026-10-03
 
 ### Added
