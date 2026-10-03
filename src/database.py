@@ -95,6 +95,9 @@ class Repository(Protocol):
         storage_ref: str,
     ) -> dict[str, Any]: ...
     def get_case(self, case_uuid: str) -> dict[str, Any] | None: ...
+    def list_cases(
+        self, limit: int = 50, offset: int = 0, status: str = "", tlp: str = ""
+    ) -> list[dict[str, Any]]: ...
     def set_status(self, case_uuid: str, status: str, task_id: str = "") -> None: ...
     def save_result(
         self,
@@ -215,6 +218,29 @@ class StdlibSqliteRepo:
             ev = conn.execute("SELECT * FROM evidence WHERE case_id=?", (d["id"],)).fetchall()
             d["evidence"] = [dict(r) for r in ev]
             return _jsonable(d)
+
+    def list_cases(
+        self, limit: int = 50, offset: int = 0, status: str = "", tlp: str = ""
+    ) -> list[dict[str, Any]]:
+        limit = max(1, min(limit, 200))
+        offset = max(0, offset)
+        # Static query shapes only (no interpolated SQL: column names and
+        # operators are fixed literals, values always bound parameters).
+        base = "SELECT case_uuid, filename, sha256, tlp, owner, status, created_at FROM cases "
+        tail = " ORDER BY id DESC LIMIT ? OFFSET ?"
+        q: str
+        params: list[Any]
+        if status and tlp:
+            q, params = base + "WHERE status=? AND tlp=?" + tail, [status, tlp]
+        elif status:
+            q, params = base + "WHERE status=?" + tail, [status]
+        elif tlp:
+            q, params = base + "WHERE tlp=?" + tail, [tlp]
+        else:
+            q, params = base + tail.lstrip(), []
+        with self._conn() as conn:
+            rows = conn.execute(q, (*params, limit, offset)).fetchall()
+            return _jsonable([dict(r) for r in rows])
 
     def set_status(self, case_uuid: str, status: str, task_id: str = "") -> None:
         with self._conn() as conn:

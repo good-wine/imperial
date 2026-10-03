@@ -284,7 +284,6 @@ def _register_verify(api: FastAPI, ctx: _ApiCtx) -> None:
     import shutil
     import uuid as _uuid
 
-    from src.database import get_repository
     from src.security import guess_mime, sha256_of
     from src.tlp import normalize
 
@@ -304,6 +303,7 @@ def _register_verify(api: FastAPI, ctx: _ApiCtx) -> None:
         timestamp_utc: str | None = Form(None),
         authorization: str | None = Header(None, alias="Authorization"),
     ) -> JSONResponse:
+        from src.database import get_repository
         from src.oidc import analyst_id
 
         try:
@@ -361,8 +361,32 @@ def _register_verify(api: FastAPI, ctx: _ApiCtx) -> None:
 
 
 def _register_cases(api: FastAPI, ctx: _ApiCtx) -> None:
-    from src.database import get_repository
     from src.tlp import allows, redact
+
+    @api.get("/api/v1/cases")
+    def list_cases(
+        limit: int = 50,
+        offset: int = 0,
+        status: str = "",
+        tlp: str = "",
+        clearance: str = "TLP:CLEAR",
+        x_tlp: str | None = Header(None, alias="X-TLP"),
+    ) -> JSONResponse:
+        """Paginated case listing with status/TLP filters.
+
+        TLP rule for collections: records above the requester clearance are
+        silently omitted (a 403 would itself leak their existence).
+        """
+        from src.database import get_repository
+
+        clr = _clearance(x_tlp, clearance)
+        repo = get_repository()
+        rows = [
+            r
+            for r in repo.list_cases(limit=limit, offset=offset, status=status, tlp=tlp)
+            if allows(clr, r.get("tlp", "TLP:CLEAR"))
+        ]
+        return JSONResponse({"cases": rows, "returned": len(rows)})
 
     @api.get("/api/v1/cases/{case_uuid}")
     def get_case(
@@ -370,6 +394,8 @@ def _register_cases(api: FastAPI, ctx: _ApiCtx) -> None:
         clearance: str = "TLP:CLEAR",
         x_tlp: str | None = Header(None, alias="X-TLP"),
     ) -> JSONResponse:
+        from src.database import get_repository
+
         clr = _clearance(x_tlp, clearance)
         repo = get_repository()
         case = _get_case_or_404(repo, case_uuid)
@@ -514,10 +540,10 @@ def _render_siem_report(report_json: str, format: str) -> tuple[str, str]:
 
 
 def _register_exports(api: FastAPI, ctx: _ApiCtx) -> None:
-    from src.database import get_repository
-
     def _gated_result(case_uuid: str, clr: str) -> tuple[dict, dict]:
         """Fetch case + latest result with TLP gate and readiness check."""
+        from src.database import get_repository
+
         repo = get_repository()
         case = _get_case_or_404(repo, case_uuid)
         _require_clearance(clr, case.get("tlp", "TLP:CLEAR"), "export")
@@ -536,6 +562,8 @@ def _register_exports(api: FastAPI, ctx: _ApiCtx) -> None:
         """SOC formats: ?format=cef (ArcSight) | leef (QRadar) | ecs (Elastic).
         Fixed schema only — no LLM prose crosses into SIEM (injection-safe)."""
         import json as _json
+
+        from src.database import get_repository
 
         clr = _clearance(x_tlp, clearance)
         repo = get_repository()
@@ -560,6 +588,8 @@ def _register_exports(api: FastAPI, ctx: _ApiCtx) -> None:
     ) -> JSONResponse:
         import json as _json
 
+        from src.database import get_repository
+
         clr = _clearance(x_tlp, clearance)
         repo = get_repository()
         _, res = _gated_result(case_uuid, clr)
@@ -573,12 +603,12 @@ def _register_exports(api: FastAPI, ctx: _ApiCtx) -> None:
 
 
 def _register_feedback(api: FastAPI, ctx: _ApiCtx) -> None:
-    from src.database import get_repository
 
     @api.post("/api/v1/feedback")
     async def feedback(
         payload: dict, authorization: str | None = Header(None, alias="Authorization")
     ) -> JSONResponse:
+        from src.database import get_repository
         from src.oidc import analyst_id
 
         try:

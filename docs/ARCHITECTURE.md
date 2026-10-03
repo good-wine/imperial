@@ -50,6 +50,14 @@ deterministic risk + ACH + LLM narrative → STIX 2.1`.
   `MODEL_SIG_ENFORCE=1`, run compose with `--network none` after first boot.
 - GPU: `docker compose --profile gpu` (worker-gpu, NVIDIA runtime); torch
   auto-selects cuda, ONNX prefers TensorRT.
+- High availability: this stack is single-instance by design (field/air-gap
+  default). For fixed-site production: Postgres → Patroni/Stolon cluster
+  (`DATABASE_URL` already a single knob), Redis → Sentinel or managed
+  ElastiCache (only `CELERY_BROKER_URL` changes; the rate limiter shares it),
+  Qdrant → distributed mode with the same collection name, API/worker →
+  plain replicas behind the Caddy edge (rate budget is already shared via
+  Redis). Backups: `scripts/backup_volumes.sh` (pg_dump + Qdrant snapshots
+  + Redis RDB); retention purge runs daily via the `beat` service.
 - Known honest gaps: ImageBind (CLIP-512 implemented; adapter = same
   `search_correlated` surface), SynthID pixel check (needs DeepMind weights;
   metadata tier is decisive), Milvus/Weaviate (connected, not primary).

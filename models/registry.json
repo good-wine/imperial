@@ -20,7 +20,8 @@
       "path": "models/clip_image.onnx",
       "task": "embedding",
       "version": "bring-your-own-v1",
-      "notes": "CLIP ViT-B/32 image tower (512-d) for semantic decontextualization search. See src/embeddings.py."
+      "notes": "CLIP ViT-B/32 image tower (512-d) for semantic decontextualization search. See src/embeddings.py.",
+      "sha256": "82df6f717c31c53aec4cfef86f7f64eb97ec938617cfd4453a6d1d9c9cd759e1"
     },
     {
       "name": "spectral-lr",
@@ -28,7 +29,12 @@
       "task": "synthetic",
       "input": "spectral32",
       "version": "bootstrap-v1-auc0.738-n120",
-      "notes": "LR on shared 32-bin radial spectral profile; bootstrap corpus (labels from construction). Weak signal, blended 35%. Replace with FaceForensics++/DFDC head for operations."
+      "notes": "LR on shared 32-bin radial spectral profile; bootstrap corpus (labels from construction). Weak signal, blended 35%. Replace with FaceForensics++/DFDC head for operations.",
+      "sha256": "de102d75b8532dc298ef488e401a1768cf0e11d8f4ffdaf485ce451fa1e31e1b"
     }
-  ]
+  ],
+  "whisper": {
+    "tiny.pt": "65147644a518d12f04e32d6f3b26facc3f8dd46e5390956a9424a650c0ce22b9",
+    "small.pt": "9ecf779972d90ba49c06d968637d720dd632c55bbf19d441fb42bf17a411e794"
+  }
 }

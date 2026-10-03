@@ -532,3 +532,40 @@ def test_engine_wrappers_unsigned():
     _ctx, summ = run_context_engine(p, store=InMemoryEventStore())
     assert summ["decontextualization"] == "NOT_OBSERVED"
     assert summ["semantic_tier"] in ("active", "offline-hash-only")
+
+
+def test_cases_listing_tlp_omission_and_filters(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    import main
+    from src.database import StdlibSqliteRepo
+
+    repo = StdlibSqliteRepo(tmp_path / "list.db")
+    uuids = {}
+    for tlp in ("TLP:GREEN", "TLP:RED", "TLP:CLEAR"):
+        c = repo.create_case(
+            filename="x.png",
+            sha256="ab" * 32,
+            file_size=1,
+            mime_type="image/png",
+            tlp=tlp,
+            owner="t",
+            storage_ref="/tmp/x.png",
+        )
+        uuids[tlp] = c["case_uuid"]
+    repo.set_status(uuids["TLP:GREEN"], "done")
+    # Endpoints resolve get_repository lazily per request: patch the source.
+    import src.database
+
+    monkeypatch.setattr(src.database, "get_repository", lambda *a, **k: repo)
+    with TestClient(main.app, raise_server_exceptions=False) as client:
+        clear = client.get("/api/v1/cases", params={"clearance": "TLP:CLEAR"}).json()
+        assert {c["tlp"] for c in clear["cases"]} == {"TLP:CLEAR"}
+        red = client.get("/api/v1/cases", params={"clearance": "TLP:RED"}).json()
+        assert len(red["cases"]) == 3
+        done = client.get("/api/v1/cases", params={"clearance": "TLP:RED", "status": "done"}).json()
+        assert [c["case_uuid"] for c in done["cases"]] == [uuids["TLP:GREEN"]]
+        page = client.get(
+            "/api/v1/cases", params={"clearance": "TLP:RED", "limit": 1, "offset": 1}
+        ).json()
+        assert page["returned"] == 1
