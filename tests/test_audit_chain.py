@@ -65,6 +65,27 @@ def test_concurrent_writers_do_not_fork_the_chain(tmp_path):
     assert out["rows"] == 6
 
 
+def test_all_breaks_lists_every_bad_row_and_keeps_walking(tmp_path):
+    """The restore drill needs the full break set, not just the first one, to
+    tell an inherited historic fork from corruption the backup introduced."""
+    repo = _repo(tmp_path)
+    _rewrite(repo, "UPDATE audit_trail SET detail=? WHERE id=2", ('{"i": 99}',))
+    _rewrite(repo, "UPDATE audit_trail SET detail=? WHERE id=4", ('{"i": 99}',))
+    out = repo.verify_audit_chain(all_breaks=True)
+    assert out["ok"] is False
+    # Row 2's payload no longer matches its seal; the walk re-anchors on the
+    # stored hash, so row 3 still chains and only row 4 is independently bad.
+    assert [b["id"] for b in out["breaks"]] == [2, 4]
+    assert repo.verify_audit_chain()["broken_at"] == 2
+
+
+def test_intact_chain_reports_an_empty_break_list(tmp_path):
+    repo = _repo(tmp_path)
+    out = repo.verify_audit_chain(all_breaks=True)
+    assert out["ok"] is True
+    assert out["breaks"] == []
+
+
 def test_verify_can_start_after_a_documented_break(tmp_path):
     """Operators must be able to verify the post-fix chain without the historic
     fork being silently repaired (that would be evidence tampering)."""

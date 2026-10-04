@@ -34,6 +34,19 @@ coverage:
 eval:
 	$(PY) scripts/eval_metrics.py
 
+# Disaster-recovery drill: restore a backup set into a throwaway database and
+# verify the custody log survives. Non-destructive; exits non-zero on failure.
+restore-drill:
+	bash scripts/restore_drill.sh $(or $(BACKUP),backups/live-check)
+
+# Integrity of the signed model weights (SHA-256 + registry pins).
+verify-weights:
+	$(PY) scripts/verify_weights.py
+
+# Tamper-evidence check for the DB audit chain (exit 1 on break).
+audit-verify:
+	$(PY) scripts/verify_audit_chain.py
+
 # Local single-node run (SQLite + memory vector store + eager worker).
 run-api:
 	$(PY) -m uvicorn main:app --host 127.0.0.1 --port 8001

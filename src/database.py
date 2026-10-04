@@ -188,7 +188,7 @@ class Repository(Protocol):
         self, *, actor: str, action: str, case_uuid: str = "", detail: dict[str, Any] | None = None
     ) -> None: ...
     def audit_for(self, case_uuid: str) -> list[dict[str, Any]]: ...
-    def verify_audit_chain(self, since_id: int = 0) -> dict[str, Any]:
+    def verify_audit_chain(self, since_id: int = 0, all_breaks: bool = False) -> dict[str, Any]:
         """Recompute the audit hash chain; report the first break, if any."""
         ...
 
@@ -536,8 +536,14 @@ class StdlibSqliteRepo:
         )
         raise RuntimeError("audit: chain contention, append refused")
 
-    def verify_audit_chain(self, since_id: int = 0) -> dict[str, Any]:
+    def verify_audit_chain(self, since_id: int = 0, all_breaks: bool = False) -> dict[str, Any]:
         """Recompute the audit hash chain and report the first break.
+
+        `all_breaks=True` keeps walking after each break instead of returning
+        at the first one, listing every bad row id. Needed by the restore drill:
+        a faithful backup of a chain with a documented historic fork reproduces
+        that fork, so the meaningful question is whether the restored copy has
+        any break the live database does NOT also have.
 
         `since_id` starts verification after a given row id (seeding the
         expected `prev` from that row). It exists because the live chain has a
@@ -570,24 +576,38 @@ class StdlibSqliteRepo:
                     "SELECT row_hash FROM audit_trail WHERE id = ?", (since_id,)
                 ).fetchone()
                 prev = anchor["row_hash"] if anchor else "GENESIS"
+        breaks: list[dict[str, Any]] = []
         for r in rows:
             expected = hashlib.sha256((prev + str(r["detail"])).encode()).hexdigest()
+            reason = None
             if str(r["prev_hash"]) != prev:
-                return {
-                    "ok": False,
-                    "rows": len(rows),
-                    "broken_at": int(r["id"]),
-                    "reason": "prev_hash does not chain to the previous row",
-                }
-            if str(r["row_hash"]) != expected:
-                return {
-                    "ok": False,
-                    "rows": len(rows),
-                    "broken_at": int(r["id"]),
-                    "reason": "detail payload no longer matches its row_hash",
-                }
+                reason = "prev_hash does not chain to the previous row"
+            elif str(r["row_hash"]) != expected:
+                reason = "detail payload no longer matches its row_hash"
+            if reason is not None:
+                if not all_breaks:
+                    return {
+                        "ok": False,
+                        "rows": len(rows),
+                        "broken_at": int(r["id"]),
+                        "reason": reason,
+                    }
+                breaks.append({"id": int(r["id"]), "reason": reason})
+                # Re-anchor on the stored hash: a forked row still advances the
+                # chain, so later rows are checked against it rather than
+                # against a value we know is not theirs.
+                prev = str(r["row_hash"])
+                continue
             prev = expected
-        return {"ok": True, "rows": len(rows), "broken_at": None, "reason": None}
+        if breaks:
+            return {
+                "ok": False,
+                "rows": len(rows),
+                "broken_at": breaks[0]["id"],
+                "reason": breaks[0]["reason"],
+                "breaks": breaks,
+            }
+        return {"ok": True, "rows": len(rows), "broken_at": None, "reason": None, "breaks": []}
 
     def audit_for(self, case_uuid: str) -> list[dict[str, Any]]:
         with self._conn() as conn:

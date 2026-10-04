@@ -62,6 +62,17 @@ deterministic risk + ACH + LLM narrative → STIX 2.1`.
   audits every action (`case.requeued` / `case.abandoned`). If dispatch fails
   the case is left visibly stuck, never labelled `queued`. Verified live:
   SIGKILL → stranded → reap → `done` in ~15 s.
+- **Restore drill**: `make restore-drill BACKUP=backups/<set>` restores a
+  backup set into a throwaway database inside the postgres container and drops
+  it afterwards (never touches live, never stops a service). It checks that
+  the dump restores, that cases present in both copies carry the same sha256,
+  that every case which left live after the backup has a
+  `case.purged`/`case.abandoned` audit entry, that stored reports are intact
+  JSON, that the Qdrant snapshot names its collection and that the Redis RDB
+  has the REDIS magic. Custody-log criterion: the restored chain may
+  reproduce the **documented** 2026-10-04 fork (row 84), but must introduce
+  no break the live database does not also have. Result on
+  `backups/drill-fresh`: 15 passed, 0 failed.
 - Case storage is NEVER touched by ad-hoc shell loops (an empty-expansion
   class of error once deleted live rows' blobs). Orphan cleanup goes only
   through `python scripts/prune_orphans.py` (dry-run default, explicit

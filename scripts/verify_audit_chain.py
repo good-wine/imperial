@@ -34,13 +34,18 @@ def main() -> int:
         default=0,
         help="verify only rows after this id (use to check the post-fix chain)",
     )
+    ap.add_argument(
+        "--all-breaks",
+        action="store_true",
+        help="list every bad row instead of stopping at the first",
+    )
     args = ap.parse_args()
 
     from src.database import get_repository
 
     repo = get_repository()
     try:
-        out = repo.verify_audit_chain(since_id=args.since_id)
+        out = repo.verify_audit_chain(since_id=args.since_id, all_breaks=args.all_breaks)
     except Exception as exc:  # CLI must report the failure, not traceback
         print(f"audit chain: UNVERIFIABLE ({type(exc).__name__}: {exc})")
         return 2
@@ -51,6 +56,8 @@ def main() -> int:
         print(f"audit chain OK: {out['rows']} rows, every detail payload sealed")
     else:
         print(f"audit chain BROKEN at row {out['broken_at']} of {out['rows']}: {out['reason']}")
+        for b in out.get("breaks", [])[1:]:
+            print(f"  also broken at row {b['id']}: {b['reason']}")
 
     if out["ok"] and not args.json:
         print(
