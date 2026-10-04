@@ -62,6 +62,20 @@ deterministic risk + ACH + LLM narrative → STIX 2.1`.
   audits every action (`case.requeued` / `case.abandoned`). If dispatch fails
   the case is left visibly stuck, never labelled `queued`. Verified live:
   SIGKILL → stranded → reap → `done` in ~15 s.
+- **Rejected: two-phase verdict** (deterministic verdict signed first, LLM
+  narrative as a second write). Proposed to fix a 5-minute turnaround seen
+  during an earlier session; measured before building it and the premise was
+  wrong. Component timings on this host: C2PA 0.09 s, visual forensics
+  3.3 s, context (CLIP + hashes) 10 s, watermark 0.04 s, redaction 0.01 s,
+  report generation 0.03 s — `LLM_BACKEND=auto` resolves to `rule-based` on
+  this host (Ollama at `localhost:11434` was not reachable from the process
+  that measured it), so the narrative was never the cost. A live end-to-end
+  submit took **22 s**
+  (queued → running → done). The 5 minutes came from worker restarts during
+  that session, and chasing it uncovered the real defect: a killed worker
+  strands its case (see the watchdog entry above). Nothing was built for a
+  latency problem that did not exist; the dashboard streams the verdict as
+  soon as it lands regardless.
 - ImageBind export provenance: the checkpoint is pinned by SHA-256 (that is
   the authoritative anchor), but the upstream clone's commit was **not
   recorded** — it lived in `/tmp` and was wiped before the field existed.
