@@ -117,6 +117,10 @@ class Repository(Protocol):
     def pending_feedback(self) -> list[dict[str, Any]]: ...
     def mark_feedback_consumed(self, feedback_id: int) -> None: ...
     def closed_cases(self) -> list[dict[str, Any]]: ...
+    def stale_open_cases(self, statuses: tuple[str, ...], before_iso: str) -> list[dict[str, Any]]:
+        """Open cases not touched since `before_iso` (stale-claim watchdog)."""
+        ...
+
     def all_case_uuids(self) -> set[str]:
         """Every known case UUID (for orphan-file reconciliation)."""
         ...
@@ -367,6 +371,35 @@ class StdlibSqliteRepo:
             return {
                 str(r["case_uuid"]) for r in conn.execute("SELECT case_uuid FROM cases").fetchall()
             }
+
+    def stale_open_cases(self, statuses: tuple[str, ...], before_iso: str) -> list[dict[str, Any]]:
+        """Open cases with no progress since `before_iso` (stale-claim watchdog).
+
+        A worker killed mid-task (deploy, OOM, host restart) leaves the case in
+        `running` forever: acks_late redelivers, but if the task was already
+        acknowledged nothing picks it up again. That is how a queue silently
+        loses work, so the watchdog needs to find exactly those rows.
+        """
+        if not statuses:
+            return []
+        marks = ",".join("?" * len(statuses))
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"SELECT case_uuid, status, task_id, created_at, updated_at FROM cases "  # noqa: S608 - fixed literals, bound params only
+                f"WHERE status IN ({marks}) AND COALESCE(updated_at, created_at) <= ?",
+                (*statuses, before_iso),
+            ).fetchall()
+            out = []
+            for r in rows:
+                d = dict(r)
+                ev = conn.execute(
+                    "SELECT storage_ref FROM evidence WHERE case_id="
+                    "(SELECT id FROM cases WHERE case_uuid=?)",
+                    (d["case_uuid"],),
+                ).fetchall()
+                d["storage_ref"] = str(ev[0]["storage_ref"]) if ev else ""
+                out.append(d)
+            return _jsonable(out)
 
     def shareable_indicators(self, limit: int = 200) -> list[dict[str, Any]]:
         limit = max(1, min(limit, 500))

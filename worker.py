@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -55,6 +56,12 @@ if _CELERY:
             "osint-poll-hourly": {
                 "task": "provenance.osint_poll",
                 "schedule": crontab(minute=15),
+            },
+            # Stale-claim watchdog: a worker killed mid-task leaves the case
+            # in `running` with nobody left to finish it. Every 5 minutes.
+            "reap-stale-cases": {
+                "task": "provenance.reap_stale",
+                "schedule": 300.0,
             },
         },
     )
@@ -145,6 +152,109 @@ def purge_expired_cases(repo: Repository | None = None) -> dict[str, Any]:
         "orphans": orphans,
         "orphans_removed": orphans_removed,
     }
+
+
+def reap_stale_cases(
+    repo: Repository | None = None,
+    stale_after_s: int | None = None,
+    dispatch: Callable[[str, str], str] | None = None,
+) -> dict[str, Any]:
+    """Requeue (or fail) cases whose worker died mid-task.
+
+    `acks_late` means a killed worker should get its task back — but if the
+    task was already acked, or the claim was consumed by a process that then
+    vanished, the case sits in `running` forever and the queue silently loses
+    work. Observed for real after a redeploy: cases stuck, zero progress.
+
+    Policy (deliberately conservative, everything audited):
+      - evidence file present -> RE-DISPATCH the task (flipping the DB row
+        alone is NOT enough: Celery drives work off its broker, not off the
+        cases table, so a requeued row that never reaches the broker is just
+        a lie that says "queued");
+      - evidence missing -> mark `failed`: retrying forever would only hide a
+        real storage problem.
+    Never touches `done`/`failed` rows.
+    """
+    import datetime as _dt
+
+    repo = repo or _repo()
+    send = dispatch or _redispatch
+    try:
+        after = int(
+            stale_after_s
+            if stale_after_s is not None
+            else os.environ.get("STALE_CASE_SECONDS", "900")
+        )
+    except (TypeError, ValueError):
+        after = 900
+    cutoff = (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(seconds=after)).isoformat()
+
+    requeued: list[str] = []
+    failed: list[str] = []
+    errors: list[str] = []
+    redispatched: list[str] = []
+    for row in repo.stale_open_cases(("queued", "running"), cutoff):
+        cuuid = str(row.get("case_uuid", ""))
+        ref = str(row.get("storage_ref") or "")
+        try:
+            if ref and Path(ref).is_file():
+                # Re-dispatch BEFORE flipping the row: if the broker refuses
+                # (redis down) the case must stay visibly stuck, not "queued".
+                task_id = send(cuuid, ref)
+                repo.set_status(cuuid, "queued", task_id=task_id)
+                action = "case.requeued"
+                redispatched.append(cuuid)
+            else:
+                repo.set_status(cuuid, "failed")
+                action = "case.abandoned"
+                failed.append(cuuid)
+            repo.audit(
+                actor="watchdog",
+                action=action,
+                case_uuid=cuuid,
+                detail={
+                    "was": row.get("status"),
+                    "stale_after_s": after,
+                    "storage_ref": ref or None,
+                    "task_id": row.get("task_id") or None,
+                },
+            )
+            requeued.append(cuuid)
+        except Exception as exc:
+            log.warning("watchdog: could not reap %s (%s)", cuuid, exc)
+            errors.append(cuuid)
+    log.info(
+        "watchdog: reaped=%d abandoned=%d errors=%d (stale after %ds)",
+        len(requeued) - len(failed),
+        len(failed),
+        len(errors),
+        after,
+    )
+    return {
+        "requeued": requeued,
+        "failed": failed,
+        "errors": errors,
+        "redispatched": redispatched,
+    }
+
+
+def _redispatch(case_uuid: str, file_path: str) -> str:
+    """Push a stranded case back onto the broker; empty id when eager.
+
+    Returns the new task id, or "" when there is no broker (eager mode runs
+    the pipeline inline). Raises so the caller leaves the case visibly stuck
+    instead of recording a recovery that never happened.
+    """
+    if not _CELERY:
+        analyze_case(case_uuid, file_path, run_eager=True)
+        return ""
+    return str(analyze_case.delay(case_uuid, file_path).id)
+
+
+def _repo():
+    from src.database import get_repository
+
+    return get_repository()
 
 
 def _reconcile_orphans(repo: Repository) -> tuple[list[str], int]:
@@ -380,6 +490,11 @@ if _CELERY:
     def purge_expired() -> dict[str, Any]:
         """Beat-scheduled retention sweep (daily per beat_schedule)."""
         return purge_expired_cases()
+
+    @app.task(name="provenance.reap_stale")
+    def reap_stale() -> dict[str, Any]:
+        """Beat-scheduled stale-claim watchdog (see `reap_stale_cases`)."""
+        return reap_stale_cases()
 else:  # eager stand-ins with identical signatures
 
     def analyze_case(
@@ -406,6 +521,9 @@ else:  # eager stand-ins with identical signatures
 
     def purge_expired() -> dict[str, Any]:
         return purge_expired_cases()
+
+    def reap_stale() -> dict[str, Any]:
+        return reap_stale_cases()
 
 
 def _maybe_trigger_retraining(repo) -> None:

@@ -219,9 +219,7 @@ class InMemoryEventStore:
         ranked = sorted(hits.values(), key=lambda h: -h.confidence)
         return ranked[: query.limit]
 
-    def _semantic_tier(
-        self, query: HybridQuery, attr: str
-    ) -> list[tuple[ProvenanceEvent, float]]:
+    def _semantic_tier(self, query: HybridQuery, attr: str) -> list[tuple[ProvenanceEvent, float]]:
         """Cosine hits for one semantic space, above ITS OWN gate, best first."""
         if attr == "ib_embedding":
             vec, threshold = query.ib_embedding, query.ib_threshold
@@ -232,8 +230,7 @@ class InMemoryEventStore:
         scored = [
             (e, sim)
             for e in self._events
-            if (ev_vec := getattr(e, attr, None))
-            and (sim := cosine(vec, ev_vec)) >= threshold
+            if (ev_vec := getattr(e, attr, None)) and (sim := cosine(vec, ev_vec)) >= threshold
         ]
         scored.sort(key=lambda t: -t[1])
         return scored[: query.limit * 2]

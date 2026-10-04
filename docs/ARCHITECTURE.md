@@ -51,6 +51,17 @@ deterministic risk + ACH + LLM narrative → STIX 2.1`.
   `tar -c --exclude=__pycache__ src ingestion security main.py worker.py \
    | docker compose exec -T -u root api tar -x -C /app`
   (repeat per service, then `docker compose restart api worker`).
+- **Stuck-case watchdog** (`provenance.reap_stale`, beat every 5 min,
+  `STALE_CASE_SECONDS` default 900). Live-measured failure it exists for:
+  `docker compose kill -s SIGKILL worker` mid-task left the case in `running`
+  **forever** — Celery's `acks_late` did NOT redeliver it, so the queue lost
+  the work silently and nothing alerted. The watchdog re-dispatches the task
+  onto the broker (flipping the DB row to `queued` is cosmetic and would be a
+  lie: Celery takes work from Redis, not from the cases table), marks cases
+  whose evidence blob is gone as `failed` instead of looping forever, and
+  audits every action (`case.requeued` / `case.abandoned`). If dispatch fails
+  the case is left visibly stuck, never labelled `queued`. Verified live:
+  SIGKILL → stranded → reap → `done` in ~15 s.
 - Case storage is NEVER touched by ad-hoc shell loops (an empty-expansion
   class of error once deleted live rows' blobs). Orphan cleanup goes only
   through `python scripts/prune_orphans.py` (dry-run default, explicit
