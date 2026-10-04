@@ -52,6 +52,10 @@ class HybridQuery:
     embedding: list[float] | None = None
     ib_embedding: list[float] | None = None  # ImageBind-1024 joint space
     clip_threshold: float = 0.90
+    # ImageBind runs at a lower self-similarity scale than CLIP (measured on
+    # the reuse benchmark: mean true cosine 0.854 vs 0.891), so it gets its
+    # own gate instead of being handicapped by CLIP's.
+    ib_threshold: float = 0.85
     limit: int = 5
 
 
@@ -215,16 +219,21 @@ class InMemoryEventStore:
         ranked = sorted(hits.values(), key=lambda h: -h.confidence)
         return ranked[: query.limit]
 
-    def _semantic_tier(self, query: HybridQuery, attr: str) -> list[tuple[ProvenanceEvent, float]]:
-        """Cosine hits for one semantic space, above threshold, best first."""
-        vec = query.ib_embedding if attr == "ib_embedding" else query.embedding
+    def _semantic_tier(
+        self, query: HybridQuery, attr: str
+    ) -> list[tuple[ProvenanceEvent, float]]:
+        """Cosine hits for one semantic space, above ITS OWN gate, best first."""
+        if attr == "ib_embedding":
+            vec, threshold = query.ib_embedding, query.ib_threshold
+        else:
+            vec, threshold = query.embedding, query.clip_threshold
         if not vec:
             return []
         scored = [
             (e, sim)
             for e in self._events
             if (ev_vec := getattr(e, attr, None))
-            and (sim := cosine(vec, ev_vec)) >= query.clip_threshold
+            and (sim := cosine(vec, ev_vec)) >= threshold
         ]
         scored.sort(key=lambda t: -t[1])
         return scored[: query.limit * 2]

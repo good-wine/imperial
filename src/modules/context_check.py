@@ -104,6 +104,7 @@ def check_context(
                     embedding=embedding,
                     ib_embedding=ib_embedding,
                     clip_threshold=SETTINGS.clip_threshold,
+                    ib_threshold=SETTINGS.ib_threshold,
                 )
             )
         else:  # legacy store compat

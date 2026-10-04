@@ -90,9 +90,50 @@ def test_ib_tier_respects_threshold():
         ProvenanceEvent(event_id="far", description="d", ib_embedding=_unit_vec(IB_DIM, seed=4))
     )
     hits = store.search_hybrid(
-        HybridQuery(ib_embedding=_unit_vec(IB_DIM, seed=5), clip_threshold=0.999)
+        HybridQuery(ib_embedding=_unit_vec(IB_DIM, seed=5), ib_threshold=0.999)
     )
     assert hits == []
+
+
+def _vec_at_cosine(target: list[float], cos: float) -> list[float]:
+    """A unit vector whose cosine against `target` is exactly `cos`."""
+    base = np.asarray(target, dtype=float)
+    rng = np.random.default_rng(99)
+    ortho = rng.random(base.shape) - np.dot(rng.random(base.shape), base) * base
+    ortho /= np.linalg.norm(ortho)
+    v = cos * base + np.sqrt(max(0.0, 1 - cos**2)) * ortho
+    return (v / np.linalg.norm(v)).tolist()
+
+
+def test_tiers_use_independent_thresholds():
+    """The spaces have different similarity scales; one shared gate is a bug.
+
+    Measured on the reuse benchmark: mean true cosine 0.891 (CLIP) vs 0.854
+    (ImageBind). Each tier must be judged against its OWN gate: here a query
+    at cosine 0.93 clears ImageBind's 0.85 but not a 0.99 gate, regardless of
+    how permissive the CLIP threshold in the same query happens to be.
+    """
+    store = InMemoryEventStore()
+    vec = _unit_vec(IB_DIM, seed=12)
+    query = _vec_at_cosine(vec, 0.93)
+    store.add_event(ProvenanceEvent(event_id="ib", description="d", ib_embedding=vec))
+    # clip_threshold 0.10 is deliberately loose: IB must not inherit it.
+    hits = store.search_hybrid(
+        HybridQuery(ib_embedding=query, clip_threshold=0.10, ib_threshold=0.99)
+    )
+    assert hits == [], "IB tier used the wrong threshold"
+    hits = store.search_hybrid(
+        HybridQuery(ib_embedding=query, clip_threshold=0.10, ib_threshold=0.90)
+    )
+    assert [h.event.event_id for h in hits] == ["ib"]
+
+
+def test_settings_expose_separate_ib_threshold():
+    from src.config import SETTINGS
+
+    assert 0.0 < SETTINGS.ib_threshold < SETTINGS.clip_threshold, (
+        "ImageBind sits at a lower similarity scale and needs its own, lower gate"
+    )
 
 
 def test_best_tier_wins_and_clip_is_independent():

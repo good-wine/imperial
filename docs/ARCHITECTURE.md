@@ -74,14 +74,19 @@ deterministic risk + ACH + LLM narrative → STIX 2.1`.
   plain replicas behind the Caddy edge (rate budget is already shared via
   Redis). Backups: `scripts/backup_volumes.sh` (pg_dump + Qdrant snapshots
   + Redis RDB); retention purge runs daily via the `beat` service.
-- Known honest gaps: ImageBind **audio tower** (vision tower exported and
-  signed as `models/imagebind_vision.onnx` + `.data`, 1024-d joint space in the
-  `provenance_ib` collection; audio↔image search needs a torchaudio build whose
-  native extension loads — the stock wheel links libcudart and fails on CPU
-  hosts). The model is 2.4 GB of external weights, so containers that do not
-  need the tier set `IMAGEBIND_ENABLED=0` and fall back to hash+CLIP. Also open:
-  SynthID pixel check (needs DeepMind weights; metadata tier is decisive),
-  Milvus/Weaviate (connected, not primary).
+- Known honest gaps: ImageBind is shipped **disabled by default and measured,
+  not assumed**: `scripts/eval_decontextualization.py` runs the reuse benchmark
+  (7 real images x 5 transformations + 15 distractors) through the real
+  fusion path and prints a verdict. Current result: end-to-end recall 0.714 →
+  0.743 (+1 query of 35), no change in false positives — i.e. **inside noise at
+  this corpus size**, not a win. It stays `IMAGEBIND_ENABLED=0` until the
+  harness runs on ≥20 images. The vision tower itself is real and signed
+  (`models/imagebind_vision.onnx` + `.data`, `provenance_ib` collection, its
+  own `IB_THRESHOLD` because its similarity scale is lower than CLIP's). The
+  **audio tower** remains unbuilt: it needs a torchaudio whose native
+  extension loads — the stock wheel links libcudart and fails on CPU hosts.
+  Also open: SynthID pixel check (needs DeepMind weights; metadata tier is
+  decisive), Milvus/Weaviate (connected, not primary).
 - v5 additions: PRNU (`src/engines/prnu_engine.py`, enroll under
   `data/prnu/`), trust pinning (`scripts/pin_trust_anchor.py`), OIDC
   (Keycloak `--profile sso`, `OIDC_ISSUER`), SIEM (`GET /export/siem`),

@@ -55,6 +55,10 @@ class Settings:
     imagebind_model_path: str = field(
         default_factory=lambda: _env("IMAGEBIND_MODEL_PATH", "models/imagebind_vision.onnx")
     )
+    # ImageBind's similarity scale is lower than CLIP's (measured mean true
+    # cosine 0.854 vs 0.891 on the reuse benchmark), so the joint-space tier
+    # gets its own gate instead of CLIP's.
+    ib_threshold: float = field(default_factory=lambda: _env_float("IB_THRESHOLD", 0.85))
     model_registry_path: str = field(
         default_factory=lambda: _env("MODEL_REGISTRY_PATH", "models/registry.json")
     )

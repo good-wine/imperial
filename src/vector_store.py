@@ -119,9 +119,9 @@ class QdrantEventStore:
     def search_hybrid(self, query: HybridQuery) -> list[HybridHit]:
         hits = {h.event.event_id: h for h in self._mirror.search_hybrid(query)}
         by_id = {e.event_id: e for e in self._mirror._events}
-        for collection, vec, dim in (
-            (COLLECTION, query.embedding, _CLIP_DIM),
-            (IB_COLLECTION, query.ib_embedding, _IB_DIM),
+        for collection, vec, dim, threshold in (
+            (COLLECTION, query.embedding, _CLIP_DIM, query.clip_threshold),
+            (IB_COLLECTION, query.ib_embedding, _IB_DIM, query.ib_threshold),
         ):
             if not vec or len(vec) != dim:
                 continue
@@ -130,7 +130,7 @@ class QdrantEventStore:
                     collection_name=collection,
                     query=[float(v) for v in vec],
                     limit=query.limit * 2,
-                    score_threshold=float(query.clip_threshold),
+                    score_threshold=float(threshold),
                 ).points
                 for p in res:
                     eid = str((p.payload or {}).get("event_id") or "")
