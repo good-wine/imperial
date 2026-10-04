@@ -1,12 +1,20 @@
 """Export ImageBind vision tower to ONNX (joint image/text/audio space).
 
 Run once on a CONNECTED station that has the 4.8 GB checkpoint and a clone of
-facebookresearch/ImageBind:
+facebookresearch/ImageBind. The upstream commit is NOT optional: the
+checkpoint is pinned by digest, but the clone supplies the model definition
+that decides the exported graph, so the export refuses to run until you name
+the revision it is building from (and checks that the clone agrees).
 
-    git clone --depth 1 --filter=blob:none --sparse <repo> /tmp/ib_repo
+    git clone --filter=blob:none --sparse <repo> /tmp/ib_repo
     git -C /tmp/ib_repo sparse-checkout set imagebind
+    git -C /tmp/ib_repo rev-parse HEAD          # -> pass as --upstream-commit
     python scripts/export_imagebind_onnx.py --weights /tmp/imagebind_huge.pth \
-                                            --repo /tmp/ib_repo
+                                            --repo /tmp/ib_repo \
+                                            --upstream-commit <sha>
+
+The resolved commit is written back into `models/registry.json` under the
+model's `source`, so the graph's origin is recorded next to its digest.
 
 Then copy `models/imagebind_vision.onnx` + `models/imagebind_vision.onnx.data`
 to the air-gapped host and sign it (`scripts/sign_models.py --sign-all`).
@@ -23,6 +31,8 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import os
+import shutil
 import sys
 import types
 from pathlib import Path
@@ -174,13 +184,91 @@ def _build_tower(weights: str) -> tuple[Any, Any]:
     return VisionTower(model).eval(), torch
 
 
+def _resolve_upstream_commit(repo: Path, declared: str) -> str:
+    """Make the upstream code revision explicit, and verify it.
+
+    Reproducibility here rests on two things, and it is worth being precise
+    about which is which: the CHECKPOINT bytes are pinned by SHA-256 in the
+    registry (authoritative — same weights in, same tensors out), while the
+    upstream clone supplies the model DEFINITION that decides the graph
+    structure. A `--depth 1` clone of `main` silently floats that second
+    input, so the export refuses to run unless the operator states the commit
+    and the working tree agrees with it.
+    """
+    import subprocess  # nosec B404 - fixed argv, no shell, operator-run export script
+
+    if not declared:
+        raise SystemExit(
+            "refusing to export: pass --upstream-commit <sha> (the ImageBind clone's HEAD). "
+            "The checkpoint is pinned by digest, but the model definition that shapes the "
+            "graph comes from this clone and must be identified."
+        )
+    try:
+        # argv is fully static apart from `repo`, which is passed as its own
+        # argument (never interpolated into a shell string) and comes from the
+        # operator running this export by hand.
+        head = subprocess.run(  # noqa: S603  # nosec B603
+            [shutil.which("git") or "git", "-C", str(repo), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise SystemExit(f"could not read the git HEAD of {repo}: {exc}") from exc
+    if not declared.startswith(head[:12]) and head[:12] not in declared:
+        raise SystemExit(
+            f"upstream commit mismatch: --upstream-commit {declared} but {repo} is at {head}. "
+            "Check out the pinned revision or pass the one you actually built."
+        )
+    return head
+
+
+def _record_source(out: Path, commit: str, checkpoint: Path) -> None:
+    """Write the export provenance next to the pin, so the registry says where
+    the graph came from instead of leaving it to memory."""
+    import json
+
+    reg = Path("models/registry.json")
+    if not reg.is_file():
+        print(f"note: {reg} not found; not recording upstream provenance")
+        return
+    doc = json.loads(reg.read_text(encoding="utf-8"))
+    touched = False
+    for m in doc.get("models", []):
+        if Path(m.get("path", "")).name == out.name:
+            m["source"] = {
+                "repo": "https://github.com/facebookresearch/ImageBind",
+                "commit": commit,
+                "checkpoint": checkpoint.name,
+                "note": (
+                    "checkpoint identity is the registry sha256 pin; "
+                    "this commit defines the exported graph"
+                ),
+            }
+            touched = True
+    if not touched:
+        print(f"note: no registry entry for {out.name}; not recording provenance")
+        return
+    reg.write_text(json.dumps(doc, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    print(f"recorded upstream commit {commit[:12]} in {reg}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Export ImageBind vision tower")
     ap.add_argument("--weights", default="/tmp/opencode/ib/imagebind_huge.pth")
     ap.add_argument("--repo", default="/tmp/opencode/ib_repo")
     ap.add_argument("--out", default="models/imagebind_vision.onnx")
     ap.add_argument("--opset", type=int, default=17)
+    ap.add_argument(
+        "--upstream-commit",
+        default=os.environ.get("IMAGEBIND_UPSTREAM_COMMIT", ""),
+        help="git SHA of the ImageBind clone that defines the exported graph",
+    )
     args = ap.parse_args()
+
+    commit = _resolve_upstream_commit(Path(args.repo), args.upstream_commit)
+    print(f"upstream ImageBind commit: {commit}")
 
     sys.path.insert(0, args.repo)
     _prepare_imports()
@@ -218,6 +306,7 @@ def main() -> int:
     print(f"onnx parity max|Δ|={maxdiff:.2e}")
     assert maxdiff < 1e-4, "torch/onnxruntime divergence"
     print(f"verified {out} (+ {out.name}.data)")
+    _record_source(out, commit, Path(args.weights))
     return 0
 
 

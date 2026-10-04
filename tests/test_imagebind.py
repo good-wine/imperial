@@ -241,7 +241,7 @@ def test_registry_pins_the_imagebind_model():
 
 def test_external_weight_blob_is_pinned_and_checked():
     """The graph hash covers ~840 KB of a 2.4 GB model: pin the blob too."""
-    from scripts.verify_weights import collect_entries
+    from src.weight_integrity import collect_entries
 
     reg = json.loads(Path("models/registry.json").read_text(encoding="utf-8"))
     entries = {label: (path, pin) for path, pin, label in collect_entries(reg)}
@@ -253,7 +253,7 @@ def test_external_weight_blob_is_pinned_and_checked():
 
 
 def test_tampered_weight_blob_is_caught(tmp_path):
-    from scripts.verify_weights import _sha, collect_entries
+    from src.weight_integrity import collect_entries, sha256_file
 
     doc = {
         "models": [
@@ -267,7 +267,7 @@ def test_tampered_weight_blob_is_caught(tmp_path):
     }
     (tmp := tmp_path / "big.onnx.data").write_bytes(b"tampered")
     entry = next(e for e in collect_entries(doc) if e[2].endswith("[weights]"))
-    assert _sha(tmp) != entry[1]  # mismatch => make verify-weights fails closed
+    assert sha256_file(tmp) != entry[1]  # mismatch => make verify-weights fails closed
 
 
 def test_cosine_of_identical_vectors_is_one():

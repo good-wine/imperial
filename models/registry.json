@@ -42,6 +42,12 @@
       "external_data": {
         "path": "models/imagebind_vision.onnx.data",
         "sha256": "cd19d4dc535a637db5ff71bade7787865152ffa172d8a405c9705817258ba1e6"
+      },
+      "source": {
+        "repo": "https://github.com/facebookresearch/ImageBind",
+        "commit": "UNRECORDED",
+        "checkpoint": "imagebind_huge.pth",
+        "note": "The commit that produced this graph was not recorded: the clone lived in /tmp and was wiped by external cleanup before this field existed. Do not invent one. Reproducibility rests on the checkpoint digest pins; a re-export now REQUIRES --upstream-commit and writes the real sha here (scripts/export_imagebind_onnx.py). Treat this graph as verified-but-unattributed until someone rebuilds it from a pinned revision."
       }
     }
   ],

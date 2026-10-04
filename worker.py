@@ -63,6 +63,12 @@ if _CELERY:
                 "task": "provenance.reap_stale",
                 "schedule": 300.0,
             },
+            # Supply-chain tripwire: re-check the vendored weight pins hourly.
+            # Memoized on (size, mtime), so this costs ~0.1 s, not ~18 s.
+            "verify-model-pins-hourly": {
+                "task": "provenance.verify_models",
+                "schedule": crontab(minute=7),
+            },
         },
     )
 else:
@@ -255,6 +261,46 @@ def _repo():
     from src.database import get_repository
 
     return get_repository()
+
+
+def verify_model_integrity(
+    repo: Repository | None = None, use_cache: bool = True
+) -> dict[str, Any]:
+    """Scheduled weight-pin check (hourly on beat).
+
+    Hashing the vendored weights costs ~18 s, which is why the digest is
+    memoized on (size, mtime_ns): the scheduled run costs ~0.1 s and only
+    re-hashes what actually changed. A mismatch is an alertable event — the
+    audit trail records it, and MODEL_SIG_ENFORCE still refuses to load the
+    tampered file. Returns the report; never raises, so a broken check cannot
+    take the worker down.
+    """
+    from src.weight_integrity import verify_registry
+
+    out = verify_registry(use_cache=use_cache)
+    if out["ok"]:
+        log.info(
+            "weight-integrity: %d pins ok (%d cached, %.2fs)",
+            out["checked"],
+            out["cached"],
+            out["elapsed_s"],
+        )
+        return out
+    try:
+        (_repo() if repo is None else repo).audit(
+            actor="integrity",
+            action="models.pin_mismatch",
+            detail={
+                "mismatches": out.get("mismatches", [])[:10],
+                "error": out.get("error", ""),
+            },
+        )
+    except Exception as exc:
+        log.error("weight-integrity: audit of the mismatch failed (%s)", exc)
+    log.error(
+        "weight-integrity: FAILED — %s", json.dumps(out.get("mismatches") or out.get("error"))
+    )
+    return out
 
 
 def _reconcile_orphans(repo: Repository) -> tuple[list[str], int]:
@@ -495,6 +541,11 @@ if _CELERY:
     def reap_stale() -> dict[str, Any]:
         """Beat-scheduled stale-claim watchdog (see `reap_stale_cases`)."""
         return reap_stale_cases()
+
+    @app.task(name="provenance.verify_models")
+    def verify_models() -> dict[str, Any]:
+        """Beat-scheduled weight-pin verification (see `verify_model_integrity`)."""
+        return verify_model_integrity()
 else:  # eager stand-ins with identical signatures
 
     def analyze_case(
@@ -524,6 +575,9 @@ else:  # eager stand-ins with identical signatures
 
     def reap_stale() -> dict[str, Any]:
         return reap_stale_cases()
+
+    def verify_models() -> dict[str, Any]:
+        return verify_model_integrity()
 
 
 def _maybe_trigger_retraining(repo) -> None:

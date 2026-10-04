@@ -62,6 +62,14 @@ deterministic risk + ACH + LLM narrative → STIX 2.1`.
   audits every action (`case.requeued` / `case.abandoned`). If dispatch fails
   the case is left visibly stuck, never labelled `queued`. Verified live:
   SIGKILL → stranded → reap → `done` in ~15 s.
+- ImageBind export provenance: the checkpoint is pinned by SHA-256 (that is
+  the authoritative anchor), but the upstream clone's commit was **not
+  recorded** — it lived in `/tmp` and was wiped before the field existed.
+  `models/registry.json` says `commit: UNRECORDED` rather than carrying an
+  invented sha. `scripts/export_imagebind_onnx.py` now refuses to export
+  without `--upstream-commit`, verifies it against the clone's HEAD, and
+  writes the resolved sha back into the registry, so the next rebuild is
+  attributable. Until then the shipped graph is verified-but-unattributed.
 - **Restore drill**: `make restore-drill BACKUP=backups/<set>` restores a
   backup set into a throwaway database inside the postgres container and drops
   it afterwards (never touches live, never stops a service). It checks that
@@ -79,6 +87,16 @@ deterministic risk + ACH + LLM narrative → STIX 2.1`.
   `--execute --i-understand-that-this-deletes-evidence`, audited).
 - Rate limit: `API_RATE_LIMIT_PER_MIN` (default 30, 0 disables).
 - Metrics: `GET /metrics` (verify/feedback/stix/osint counters).
+- Weight integrity is **scheduled**, not decorative: `provenance.verify_models`
+  runs hourly on `beat` (~0.1 s) and re-checks every pin in
+  `models/registry.json`; a mismatch writes a `models.pin_mismatch` audit
+  entry. Digests are memoized on `(size, mtime_ns)` in
+  `data/model_integrity.json` because a full re-hash of the 2.4 GB blob costs
+  ~18 s. Honest limit: that cache trusts filesystem metadata, so an attacker
+  who rewrites a weight *and* restores its mtime defeats it — it is a
+  tripwire around the signature gate, not a replacement. Use
+  `make verify-weights` / `python scripts/verify_weights.py --no-cache` before
+  an air-gap transfer, where the full hash is required.
 - Air-gap: bake `models/` (+`.sig` via `scripts/sign_models.py`), set
   `MODEL_SIG_ENFORCE=1`, run compose with `--network none` after first boot.
   Transfer `models/imagebind_vision.onnx` AND `models/imagebind_vision.onnx.data`

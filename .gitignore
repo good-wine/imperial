@@ -23,6 +23,7 @@ config/imperial-root.crt
 data/*.db
 data/*.db-journal
 data/cases/
+data/model_integrity.json
 data/osint/
 data/tg_session*
 reports/*.report.json
