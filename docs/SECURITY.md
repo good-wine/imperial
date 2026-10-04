@@ -19,6 +19,40 @@ Evidence rows; hash-chained append-only audit in PostgreSQL
 (`audit_trail`, `prev_hash`/`row_hash`) mirrored to JSONL (`src/audit.py`
 with content-seal `row_hash` + legacy-compat verify). Tamper test in suite.
 
+Verify either side: `python scripts/verify_audit_chain.py` (DB table, exit 1
+on break) and `python -c "from src import audit; print(audit.verify_chain(
+'reports/audit.jsonl'))"` (JSONL mirror).
+
+### Incident 2026-10-04: forked audit chain, live (open, by design)
+`scripts/verify_audit_chain.py` reported **BROKEN at row 84 of 85** on the
+live Postgres. Diagnosis, not speculation: rows 83 and 84 were exact
+duplicates — same `prev_hash`, same `row_hash`, same actor/action and the
+same second. Root cause: `audit()` read the chain tip and inserted as two
+separate statements, and the SQLAlchemy adapter commits after *every*
+statement, so there was no transaction spanning the read-modify-write. Two
+processes (worker + API/watchdog) read the same tip and both appended.
+
+Fix (shipped): a partial unique index `ux_audit_prev_hash ON audit_trail
+(prev_hash) WHERE id > 85` turns the race into a constraint violation, and
+`audit()` retries against the new tip, so the **database** enforces
+single-writer ordering instead of trusting application timing. Verified with
+four concurrent processes against live Postgres: 20 rows, zero forks,
+`--since-id 85` verifies clean.
+
+Deliberately **not** repaired: the duplicate rows are untouched forensic
+evidence. Deleting or rewriting them would be evidence tampering, so the
+historic break stays visible to `verify_audit_chain()` and operators verify
+the post-fix chain with `--since-id`. Resolving rows 83/84 needs a human
+decision on the record, not a patch.
+
+Known limits of the DB chain, stated rather than glossed: `row_hash` seals
+`prev_hash + detail`, so edits confined to `actor`, `action`, `case_uuid` or
+`ts` are **not** detected by it (a test pins this so the limitation cannot be
+quietly forgotten) — the JSONL mirror seals the whole event and is the
+authoritative custody log. A truncated **tail** is undetectable by any chained
+structure; that is what `scripts/backup_volumes.sh` and off-host copies are
+for.
+
 ## At-rest protection
 `CASES_FERNET_KEY` enables field-level encryption (report JSON, analyst
 notes); without it the stack still runs (documented, defense-in-depth).

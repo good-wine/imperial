@@ -18,16 +18,63 @@ import json
 import logging
 import os
 import sqlite3
+import time
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
 
 log = logging.getLogger(__name__)
 
+# How many times an audit append retries when another writer advanced the
+# chain first. Contention is rare (one row per case transition) so a handful
+# of attempts is plenty; exhaustion raises rather than writing unsealed data.
+_AUDIT_WRITE_ATTEMPTS = 8
+
+# Both engines raise their own IntegrityError; the sqlite repo must not miss
+# the SQLAlchemy one (and vice versa) or a chain-collision retry turns into an
+# unhandled crash in a worker thread.
+_INTEGRITY_ERRORS: tuple[type[BaseException], ...] = (sqlite3.IntegrityError,)
+try:  # SQLAlchemy is optional (stdlib-sqlite fallback).
+    from sqlalchemy.exc import IntegrityError as _SAIntegrityError
+
+    _INTEGRITY_ERRORS = (*_INTEGRITY_ERRORS, _SAIntegrityError)
+except ImportError:  # pragma: no cover - exercised on the sqlite-only path
+    pass
+
 
 def utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _ensure_chain_unique(run: Callable[[str], Any]) -> None:
+    """Serialize audit writers with a uniqueness rule on `prev_hash`.
+
+    Two writers that read the same chain tip and both append produce two rows
+    with the same `prev_hash` — the chain forks and no longer verifies. A
+    unique index turns that race into a constraint violation the writer can
+    retry, so the database enforces single-writer ordering instead of trusting
+    application code to be fast enough.
+
+    The index is PARTIAL (`WHERE id > N`, N = highest id at install time) on
+    purpose: a chain that was already forked must keep its broken rows intact
+    as forensic evidence. Silently rewriting or deduplicating them would be
+    evidence tampering. Rows written from here on are protected; the historic
+    break stays visible to `verify_audit_chain` until an operator resolves it
+    on the record.
+    """
+    rows = run("SELECT COALESCE(MAX(id), 0) FROM audit_trail")
+    high = int(rows[0][0]) if rows else 0
+    try:
+        run(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_audit_prev_hash ON audit_trail(prev_hash) "
+            f"WHERE id > {high}"
+        )
+    except Exception as exc:  # advisory only: audit must keep working
+        log.warning("database: could not install audit chain index (%s)", exc)
+        return
+    log.info("database: audit chain serialized for rows > %d", high)
 
 
 def _jsonable(obj: Any) -> Any:
@@ -117,7 +164,7 @@ class Repository(Protocol):
     def pending_feedback(self) -> list[dict[str, Any]]: ...
     def mark_feedback_consumed(self, feedback_id: int) -> None: ...
     def closed_cases(self) -> list[dict[str, Any]]: ...
-    def stale_open_cases(self, statuses: tuple[str, ...], before_iso: str) -> list[dict[str, Any]]:
+    def stale_open_cases(self, before_iso: str) -> list[dict[str, Any]]:
         """Open cases not touched since `before_iso` (stale-claim watchdog)."""
         ...
 
@@ -141,6 +188,9 @@ class Repository(Protocol):
         self, *, actor: str, action: str, case_uuid: str = "", detail: dict[str, Any] | None = None
     ) -> None: ...
     def audit_for(self, case_uuid: str) -> list[dict[str, Any]]: ...
+    def verify_audit_chain(self, since_id: int = 0) -> dict[str, Any]:
+        """Recompute the audit hash chain; report the first break, if any."""
+        ...
 
 
 _SCHEMA = """
@@ -172,6 +222,7 @@ class StdlibSqliteRepo:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self.path) as conn:
             conn.executescript(_SCHEMA)
+            _ensure_chain_unique(lambda sql: conn.execute(sql).fetchall())
 
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path)
@@ -372,7 +423,7 @@ class StdlibSqliteRepo:
                 str(r["case_uuid"]) for r in conn.execute("SELECT case_uuid FROM cases").fetchall()
             }
 
-    def stale_open_cases(self, statuses: tuple[str, ...], before_iso: str) -> list[dict[str, Any]]:
+    def stale_open_cases(self, before_iso: str) -> list[dict[str, Any]]:
         """Open cases with no progress since `before_iso` (stale-claim watchdog).
 
         A worker killed mid-task (deploy, OOM, host restart) leaves the case in
@@ -380,14 +431,16 @@ class StdlibSqliteRepo:
         acknowledged nothing picks it up again. That is how a queue silently
         loses work, so the watchdog needs to find exactly those rows.
         """
-        if not statuses:
-            return []
-        marks = ",".join("?" * len(statuses))
+        # Literal status set on purpose: no SQL text is ever built from a
+        # parameter, so there is nothing for an injection to reach. Only
+        # `before_iso` is bound. Closed states are excluded here rather than
+        # filtered in Python, so a settled case can never be reaped.
         with self._conn() as conn:
             rows = conn.execute(
-                f"SELECT case_uuid, status, task_id, created_at, updated_at FROM cases "  # noqa: S608 - fixed literals, bound params only
-                f"WHERE status IN ({marks}) AND COALESCE(updated_at, created_at) <= ?",
-                (*statuses, before_iso),
+                "SELECT case_uuid, status, task_id, created_at, updated_at FROM cases "
+                "WHERE status IN ('queued','running') "
+                "AND COALESCE(updated_at, created_at) <= ?",
+                (before_iso,),
             ).fetchall()
             out = []
             for r in rows:
@@ -448,17 +501,93 @@ class StdlibSqliteRepo:
         self, *, actor: str, action: str, case_uuid: str = "", detail: dict[str, Any] | None = None
     ) -> None:
         payload = json.dumps(detail or {}, sort_keys=True, ensure_ascii=False)
+        # Read-tip-then-insert is NOT atomic: the SQLAlchemy adapter commits
+        # after every statement, so two writers (api + worker + watchdog) can
+        # read the same tip and both append — forking the chain. Observed live:
+        # rows 83/84 were exact duplicates and `verify_audit_chain` reported
+        # the break. The unique index on prev_hash (see _ensure_chain_unique)
+        # turns the race into a constraint violation, and the retry below
+        # re-links against the winner. The chain is serialized by the database
+        # rather than by hope.
+        for attempt in range(_AUDIT_WRITE_ATTEMPTS):
+            with self._conn() as conn:
+                last = conn.execute(
+                    "SELECT row_hash FROM audit_trail ORDER BY id DESC LIMIT 1"
+                ).fetchone()
+                prev = last["row_hash"] if last else "GENESIS"
+                row_hash = hashlib.sha256((prev + payload).encode()).hexdigest()
+                try:
+                    conn.execute(
+                        "INSERT INTO audit_trail"
+                        "(ts,actor,action,case_uuid,detail,prev_hash,row_hash)"
+                        " VALUES(?,?,?,?,?,?,?)",
+                        (utcnow(), actor[:128], action[:128], case_uuid, payload, prev, row_hash),
+                    )
+                except _INTEGRITY_ERRORS:
+                    log.warning(
+                        "audit: chain advanced concurrently, re-linking (attempt %d)", attempt
+                    )
+                    time.sleep(0.01 * (attempt + 1))
+                    continue
+                return
+        # Exhausted: fail loudly rather than silently writing an unsealed row.
+        log.error(
+            "audit: could not append after %d attempts: chain contention", _AUDIT_WRITE_ATTEMPTS
+        )
+        raise RuntimeError("audit: chain contention, append refused")
+
+    def verify_audit_chain(self, since_id: int = 0) -> dict[str, Any]:
+        """Recompute the audit hash chain and report the first break.
+
+        `since_id` starts verification after a given row id (seeding the
+        expected `prev` from that row). It exists because the live chain has a
+        documented pre-fix fork: operators can verify everything written after
+        the constraint was installed without pretending the old break away.
+
+        What this proves: no row's `detail` payload was altered, reordered or
+        removed, because each row_hash seals `prev_hash + detail`.
+
+        What it does NOT prove, stated plainly rather than glossed over:
+          - `actor`, `action`, `case_uuid` and `ts` are stored but not sealed
+            by row_hash, so editing those columns alone is undetectable here.
+            The JSONL mirror (`src/audit.py`) hashes the whole event, so it is
+            the authoritative custody log; this check is the DB-side backstop.
+          - truncating the TAIL is undetectable by construction: a shortened
+            chain still verifies. Pair it with off-host backups.
+        """
         with self._conn() as conn:
-            last = conn.execute(
-                "SELECT row_hash FROM audit_trail ORDER BY id DESC LIMIT 1"
-            ).fetchone()
-            prev = last["row_hash"] if last else "GENESIS"
-            row_hash = hashlib.sha256((prev + payload).encode()).hexdigest()
-            conn.execute(
-                "INSERT INTO audit_trail(ts,actor,action,case_uuid,detail,prev_hash,row_hash)"
-                " VALUES(?,?,?,?,?,?,?)",
-                (utcnow(), actor[:128], action[:128], case_uuid, payload, prev, row_hash),
-            )
+            rows = [
+                dict(r)
+                for r in conn.execute(
+                    "SELECT id, ts, actor, action, case_uuid, detail, prev_hash, row_hash "
+                    "FROM audit_trail WHERE id > ? ORDER BY id",
+                    (since_id,),
+                ).fetchall()
+            ]
+            prev = "GENESIS"
+            if since_id:
+                anchor = conn.execute(
+                    "SELECT row_hash FROM audit_trail WHERE id = ?", (since_id,)
+                ).fetchone()
+                prev = anchor["row_hash"] if anchor else "GENESIS"
+        for r in rows:
+            expected = hashlib.sha256((prev + str(r["detail"])).encode()).hexdigest()
+            if str(r["prev_hash"]) != prev:
+                return {
+                    "ok": False,
+                    "rows": len(rows),
+                    "broken_at": int(r["id"]),
+                    "reason": "prev_hash does not chain to the previous row",
+                }
+            if str(r["row_hash"]) != expected:
+                return {
+                    "ok": False,
+                    "rows": len(rows),
+                    "broken_at": int(r["id"]),
+                    "reason": "detail payload no longer matches its row_hash",
+                }
+            prev = expected
+        return {"ok": True, "rows": len(rows), "broken_at": None, "reason": None}
 
     def audit_for(self, case_uuid: str) -> list[dict[str, Any]]:
         with self._conn() as conn:
@@ -493,6 +622,20 @@ class SQLAlchemyRepo(StdlibSqliteRepo):
         log.info("database: SQLAlchemy repo on %s", database_url.split("@")[-1])
 
     def _ensure_compat(self) -> None:
+        # Serialize audit writers here too (PostgreSQL): same partial-unique
+        # trick, installed against the current head.
+        def _run(conn, sql: str) -> list[tuple[Any, ...]]:
+            res = conn.execute(self._text(sql))
+            try:
+                return [tuple(r) for r in res.fetchall()]
+            except Exception:  # DDL (CREATE INDEX) yields no rows
+                return []
+
+        try:
+            with self.engine.begin() as conn:
+                _ensure_chain_unique(lambda sql: _run(conn, sql))
+        except Exception as exc:  # advisory only: audit must keep working
+            log.warning("database: audit chain index not installed (%s)", exc)
         """Lightweight migrations for tables created by older model versions."""
         if self.engine.dialect.name != "postgresql":
             return

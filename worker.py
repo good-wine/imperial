@@ -193,7 +193,7 @@ def reap_stale_cases(
     failed: list[str] = []
     errors: list[str] = []
     redispatched: list[str] = []
-    for row in repo.stale_open_cases(("queued", "running"), cutoff):
+    for row in repo.stale_open_cases(cutoff):
         cuuid = str(row.get("case_uuid", ""))
         ref = str(row.get("storage_ref") or "")
         try:
