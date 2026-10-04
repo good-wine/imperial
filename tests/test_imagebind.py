@@ -198,6 +198,37 @@ def test_registry_pins_the_imagebind_model():
     assert len(ib["sha256"]) == 64
 
 
+def test_external_weight_blob_is_pinned_and_checked():
+    """The graph hash covers ~840 KB of a 2.4 GB model: pin the blob too."""
+    from scripts.verify_weights import collect_entries
+
+    reg = json.loads(Path("models/registry.json").read_text(encoding="utf-8"))
+    entries = {label: (path, pin) for path, pin, label in collect_entries(reg)}
+    if "imagebind-vision[weights]" not in entries:
+        pytest.skip("ImageBind not provisioned in this checkout")
+    path, pin = entries["imagebind-vision[weights]"]
+    assert path.endswith(".onnx.data")
+    assert len(pin) == 64
+
+
+def test_tampered_weight_blob_is_caught(tmp_path):
+    from scripts.verify_weights import _sha, collect_entries
+
+    doc = {
+        "models": [
+            {
+                "name": "big",
+                "path": "models/big.onnx",
+                "sha256": "a" * 64,
+                "external_data": {"path": "models/big.onnx.data", "sha256": "b" * 64},
+            }
+        ]
+    }
+    (tmp := tmp_path / "big.onnx.data").write_bytes(b"tampered")
+    entry = next(e for e in collect_entries(doc) if e[2].endswith("[weights]"))
+    assert _sha(tmp) != entry[1]  # mismatch => make verify-weights fails closed
+
+
 def test_cosine_of_identical_vectors_is_one():
     v = _unit_vec(IB_DIM, seed=11)
     assert cosine(v, v) == pytest.approx(1.0, abs=1e-6)

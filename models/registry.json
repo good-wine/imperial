@@ -37,8 +37,12 @@
       "path": "models/imagebind_vision.onnx",
       "task": "embedding",
       "version": "imagebind-huge-v1",
-      "notes": "ImageBind ViT-Huge vision tower (1024-d). Joint space for image/audio/text. See src/embeddings.py.",
-      "sha256": "ad766489ef663ab579910434a0a3e6fd2ca942fbeac642a6f1a5991025bc398e"
+      "notes": "ImageBind ViT-Huge vision tower (1024-d). Joint space for image/audio/text. Weights exceed the 2 GB protobuf limit, so the graph lives in a sibling .data blob. See src/embeddings.py.",
+      "sha256": "ad766489ef663ab579910434a0a3e6fd2ca942fbeac642a6f1a5991025bc398e",
+      "external_data": {
+        "path": "models/imagebind_vision.onnx.data",
+        "sha256": "cd19d4dc535a637db5ff71bade7787865152ffa172d8a405c9705817258ba1e6"
+      }
     }
   ],
   "whisper": {

@@ -59,6 +59,11 @@ deterministic risk + ACH + LLM narrative → STIX 2.1`.
 - Metrics: `GET /metrics` (verify/feedback/stix/osint counters).
 - Air-gap: bake `models/` (+`.sig` via `scripts/sign_models.py`), set
   `MODEL_SIG_ENFORCE=1`, run compose with `--network none` after first boot.
+  Transfer `models/imagebind_vision.onnx` AND `models/imagebind_vision.onnx.data`
+  together (the graph is 840 KB, the weights 2.4 GB — the `.onnx` alone is inert);
+  `python scripts/verify_weights.py` checks both pins before you cut the link.
+  `.gitignore` deliberately excludes `*.onnx.data`: weights are provisioned,
+  not versioned.
 - GPU: `docker compose --profile gpu` (worker-gpu, NVIDIA runtime); torch
   auto-selects cuda, ONNX prefers TensorRT.
 - High availability: this stack is single-instance by design (field/air-gap
