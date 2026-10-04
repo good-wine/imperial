@@ -33,7 +33,8 @@ reports/sbom*.json
 backups/
 models/*.onnx
 models/*.onnx.sig
-models/*.onnx.data  # external tensor blob (>2 GB models, e.g. ImageBind)
+# external tensor blob for models over the 2 GB protobuf limit (ImageBind)
+models/*.onnx.data
 models/*.pt
 models/whisper/
 *.log
