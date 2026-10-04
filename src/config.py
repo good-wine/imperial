@@ -52,6 +52,9 @@ class Settings:
     clip_model_path: str = field(
         default_factory=lambda: _env("CLIP_MODEL_PATH", "models/clip_image.onnx")
     )
+    imagebind_model_path: str = field(
+        default_factory=lambda: _env("IMAGEBIND_MODEL_PATH", "models/imagebind_vision.onnx")
+    )
     model_registry_path: str = field(
         default_factory=lambda: _env("MODEL_REGISTRY_PATH", "models/registry.json")
     )

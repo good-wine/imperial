@@ -67,6 +67,11 @@ services:
       OLLAMA_TIMEOUT_S: "300"
       QDRANT_URL: http://qdrant:6333
       VECTOR_BACKEND: ${VECTOR_BACKEND:-qdrant}
+      # ImageBind ONNX is 2.4 GB of external weights; enabling it in every
+      # service doubles the resident set for a tier that only helps text-heavy
+      # reuse. Opt in per-deployment: IMAGEBIND_ENABLED=1 in .env
+      # (requires models/imagebind_vision.onnx.data beside the .onnx).
+      IMAGEBIND_ENABLED: ${IMAGEBIND_ENABLED:-0}
     volumes:
       - ./data:/app/data
       - ./reports:/app/reports
@@ -93,6 +98,7 @@ services:
       OLLAMA_TIMEOUT_S: "300"
       QDRANT_URL: http://qdrant:6333
       VECTOR_BACKEND: ${VECTOR_BACKEND:-qdrant}
+      IMAGEBIND_ENABLED: ${IMAGEBIND_ENABLED:-0}  # see api: 2.4 GB, opt-in
     volumes:
       - ./data:/app/data
       - ./reports:/app/reports

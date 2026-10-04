@@ -17,7 +17,8 @@
                                         ┌──────────┐        ┌───────────┐  ┌──────────┐
                                         │ Postgres │        │  Qdrant   │  │ Milvus / │
                                         │ pgvector │        │  :6333    │  │ Weaviate │
-                                        │  :5432   │        │  CLIP-512 │  │ (opt-in) │
+                                        │  :5432   │        │ CLIP-512 +│  │ (opt-in) │
+                                         │          │        │  IB-1024  │  │          │
                                         └──────────┘        └───────────┘  └──────────┘
 ```
 
@@ -25,7 +26,7 @@ Pipeline per case: `C2PA (c2pa-python → JUMBF tree) → visual forensics
 (ELA/FFT/DCT/faces/flicker + ONNX registry, Ed25519-gated) → audio (vocoder)
 → lip-sync → rPPG → MP4 atoms → watermark (metadata + SynthID gate) →
 speech (Whisper, audio-gated) → GEOINT (opt-in coords) → context hybrid
-(pHash/PDQ-256/CLIP → Qdrant + mirror) → PII redaction (GREEN/CLEAR) →
+(pHash/PDQ-256/CLIP-512/ImageBind-1024 → Qdrant + mirror) → PII redaction (GREEN/CLEAR) →
 deterministic risk + ACH + LLM narrative → STIX 2.1`.
 
 ## Service map
@@ -68,9 +69,14 @@ deterministic risk + ACH + LLM narrative → STIX 2.1`.
   plain replicas behind the Caddy edge (rate budget is already shared via
   Redis). Backups: `scripts/backup_volumes.sh` (pg_dump + Qdrant snapshots
   + Redis RDB); retention purge runs daily via the `beat` service.
-- Known honest gaps: ImageBind (CLIP-512 implemented; adapter = same
-  `search_correlated` surface), SynthID pixel check (needs DeepMind weights;
-  metadata tier is decisive), Milvus/Weaviate (connected, not primary).
+- Known honest gaps: ImageBind **audio tower** (vision tower exported and
+  signed as `models/imagebind_vision.onnx` + `.data`, 1024-d joint space in the
+  `provenance_ib` collection; audio↔image search needs a torchaudio build whose
+  native extension loads — the stock wheel links libcudart and fails on CPU
+  hosts). The model is 2.4 GB of external weights, so containers that do not
+  need the tier set `IMAGEBIND_ENABLED=0` and fall back to hash+CLIP. Also open:
+  SynthID pixel check (needs DeepMind weights; metadata tier is decisive),
+  Milvus/Weaviate (connected, not primary).
 - v5 additions: PRNU (`src/engines/prnu_engine.py`, enroll under
   `data/prnu/`), trust pinning (`scripts/pin_trust_anchor.py`), OIDC
   (Keycloak `--profile sso`, `OIDC_ISSUER`), SIEM (`GET /export/siem`),

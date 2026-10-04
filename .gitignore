@@ -33,6 +33,7 @@ reports/sbom*.json
 backups/
 models/*.onnx
 models/*.onnx.sig
+models/*.onnx.data  # external tensor blob (>2 GB models, e.g. ImageBind)
 models/*.pt
 models/whisper/
 *.log

@@ -38,6 +38,7 @@ class ProvenanceEvent:
     # SOTA extensions (optional; old JSON keeps loading).
     pdq_hex: str | None = None
     clip_embedding: list[float] | None = None
+    ib_embedding: list[float] | None = None  # ImageBind-1024 joint space
     lat: float | None = None
     lon: float | None = None
 
@@ -49,6 +50,7 @@ class HybridQuery:
     pdq_hex: str | None = None
     pdq_threshold: int = 48  # /256 bits
     embedding: list[float] | None = None
+    ib_embedding: list[float] | None = None  # ImageBind-1024 joint space
     clip_threshold: float = 0.90
     limit: int = 5
 
@@ -103,12 +105,22 @@ def _coerce_event(row: dict[str, Any]) -> ProvenanceEvent:
         v = row.get(key)
         return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
 
-    emb = row.get("clip_embedding")
-    clip = (
-        [float(x) for x in emb]
-        if isinstance(emb, list) and emb and all(isinstance(x, (int, float)) for x in emb)
-        else None
-    )
+    def _opt_vec(key: str, dim: int) -> list[float] | None:
+        """Accept only a dense finite vector of exactly `dim` floats.
+
+        Wrong length (a swapped CLIP slot), non-numeric junk, NaN or inf from a
+        poisoned export are all dropped: a bad vector must degrade the tier,
+        never silently score 0.0 against everything.
+        """
+        v = row.get(key)
+        if not isinstance(v, list) or len(v) != dim or not v:
+            return None
+        if not all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in v):
+            return None
+        if not all(math.isfinite(float(x)) for x in v):
+            return None
+        return [float(x) for x in v]
+
     return ProvenanceEvent(
         event_id=str(row.get("event_id", ""))[:128],
         description=str(row.get("description", ""))[:1024],
@@ -117,7 +129,8 @@ def _coerce_event(row: dict[str, Any]) -> ProvenanceEvent:
         phash_hex=str(row.get("phash_hex", ""))[:64],
         dhash_hex=_opt_str("dhash_hex"),
         pdq_hex=_opt_str("pdq_hex"),
-        clip_embedding=clip,
+        clip_embedding=_opt_vec("clip_embedding", 512),
+        ib_embedding=_opt_vec("ib_embedding", 1024),
         lat=_opt_float("lat"),
         lon=_opt_float("lon"),
     )
@@ -183,17 +196,11 @@ class InMemoryEventStore:
                         else 64,
                         d,
                     )
-        # 3) CLIP cosine — semantic reuse (screenshots, memes, recaptures).
-        if query.embedding:
-            scored_c = []
-            for e in self._events:
-                if not e.clip_embedding:
-                    continue
-                sim = cosine(query.embedding, e.clip_embedding)
-                if sim >= query.clip_threshold:
-                    scored_c.append((e, sim))
-            scored_c.sort(key=lambda t: -t[1])
-            for e, sim in scored_c[: query.limit * 2]:
+        # 3) Semantic cosine tiers — CLIP-512 and ImageBind-1024 (joint space).
+        #    Fused by max confidence: ImageBind catches text-in-image reuse that
+        #    CLIP degrades on. Per-event best tier wins; hash tiers keep priority.
+        for attr in ("clip_embedding", "ib_embedding"):
+            for e, sim in self._semantic_tier(query, attr):
                 prev = hits.get(e.event_id)
                 if prev is None or sim > prev.confidence:
                     hits[e.event_id] = HybridHit(
@@ -207,6 +214,20 @@ class InMemoryEventStore:
                     )
         ranked = sorted(hits.values(), key=lambda h: -h.confidence)
         return ranked[: query.limit]
+
+    def _semantic_tier(self, query: HybridQuery, attr: str) -> list[tuple[ProvenanceEvent, float]]:
+        """Cosine hits for one semantic space, above threshold, best first."""
+        vec = query.ib_embedding if attr == "ib_embedding" else query.embedding
+        if not vec:
+            return []
+        scored = [
+            (e, sim)
+            for e in self._events
+            if (ev_vec := getattr(e, attr, None))
+            and (sim := cosine(vec, ev_vec)) >= query.clip_threshold
+        ]
+        scored.sort(key=lambda t: -t[1])
+        return scored[: query.limit * 2]
 
     def count(self) -> int:
         return len(self._events)

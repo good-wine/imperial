@@ -29,7 +29,9 @@ from src.db.store import (
 log = logging.getLogger(__name__)
 
 COLLECTION = "provenance_events"
+IB_COLLECTION = "provenance_ib"  # ImageBind-1024 joint space (no migration of CLIP-512)
 _CLIP_DIM = 512
+_IB_DIM = 1024
 
 
 class QdrantEventStore:
@@ -61,6 +63,11 @@ class QdrantEventStore:
                     COLLECTION,
                     vectors_config=VectorParams(size=_CLIP_DIM, distance=Distance.COSINE),
                 )
+            if IB_COLLECTION not in cols:
+                self._client.create_collection(
+                    IB_COLLECTION,
+                    vectors_config=VectorParams(size=_IB_DIM, distance=Distance.COSINE),
+                )
             log.info("store/qdrant: connected (%s)", url)
         except Exception as exc:
             raise RuntimeError(f"qdrant unreachable at {url}: {exc}") from exc
@@ -70,33 +77,38 @@ class QdrantEventStore:
     # -- writes go to mirror + Qdrant -------------------------------------
     def add_event(self, event: ProvenanceEvent) -> None:
         self._mirror.add_event(event)
-        if not event.clip_embedding or len(event.clip_embedding) != _CLIP_DIM:
-            return  # hash-only events live in the mirror; semantic needs 512-d
         if self._models is None:
             log.warning("store/qdrant: models unavailable; mirror only")
             return
-        try:
-            import uuid as _uuid
+        # Hash-only events (no semantic vector) live in the mirror alone.
+        for collection, vec, dim in (
+            (COLLECTION, event.clip_embedding, _CLIP_DIM),
+            (IB_COLLECTION, event.ib_embedding, _IB_DIM),
+        ):
+            if not vec or len(vec) != dim:
+                continue
+            try:
+                import uuid as _uuid
 
-            self._client.upsert(
-                collection_name=COLLECTION,
-                points=[
-                    self._models.PointStruct(
-                        id=str(_uuid.uuid5(_uuid.NAMESPACE_DNS, event.event_id)),
-                        vector=[float(v) for v in event.clip_embedding],
-                        payload={
-                            "event_id": event.event_id,
-                            "description": event.description,
-                            "event_date": event.event_date,
-                            "source": event.source,
-                            "phash_hex": event.phash_hex,
-                            "pdq_hex": event.pdq_hex,
-                        },
-                    )
-                ],
-            )
-        except Exception as exc:
-            log.warning("store/qdrant: upsert failed (%s); mirror kept", exc)
+                self._client.upsert(
+                    collection_name=collection,
+                    points=[
+                        self._models.PointStruct(
+                            id=str(_uuid.uuid5(_uuid.NAMESPACE_DNS, event.event_id)),
+                            vector=[float(v) for v in vec],
+                            payload={
+                                "event_id": event.event_id,
+                                "description": event.description,
+                                "event_date": event.event_date,
+                                "source": event.source,
+                                "phash_hex": event.phash_hex,
+                                "pdq_hex": event.pdq_hex,
+                            },
+                        )
+                    ],
+                )
+            except Exception as exc:
+                log.warning("store/qdrant: upsert to %s failed (%s); mirror kept", collection, exc)
 
     # -- reads: hash tiers on mirror (exact), semantic tier on Qdrant ------
     def search(
@@ -106,15 +118,20 @@ class QdrantEventStore:
 
     def search_hybrid(self, query: HybridQuery) -> list[HybridHit]:
         hits = {h.event.event_id: h for h in self._mirror.search_hybrid(query)}
-        if query.embedding and len(query.embedding) == _CLIP_DIM:
+        by_id = {e.event_id: e for e in self._mirror._events}
+        for collection, vec, dim in (
+            (COLLECTION, query.embedding, _CLIP_DIM),
+            (IB_COLLECTION, query.ib_embedding, _IB_DIM),
+        ):
+            if not vec or len(vec) != dim:
+                continue
             try:
                 res = self._client.query_points(
-                    collection_name=COLLECTION,
-                    query=[float(v) for v in query.embedding],
+                    collection_name=collection,
+                    query=[float(v) for v in vec],
                     limit=query.limit * 2,
                     score_threshold=float(query.clip_threshold),
                 ).points
-                by_id = {e.event_id: e for e in self._mirror._events}
                 for p in res:
                     eid = str((p.payload or {}).get("event_id") or "")
                     ev = by_id.get(eid)
@@ -133,7 +150,7 @@ class QdrantEventStore:
                             clip_similarity=sim,
                         )
             except Exception as exc:
-                log.warning("store/qdrant: semantic query failed (%s); mirror used", exc)
+                log.warning("store/qdrant: %s query failed (%s); mirror used", collection, exc)
         return sorted(hits.values(), key=lambda h: -h.confidence)[: query.limit]
 
     def search_correlated(

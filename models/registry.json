@@ -31,6 +31,14 @@
       "version": "bootstrap-v1-auc0.738-n120",
       "notes": "LR on shared 32-bin radial spectral profile; bootstrap corpus (labels from construction). Weak signal, blended 35%. Replace with FaceForensics++/DFDC head for operations.",
       "sha256": "de102d75b8532dc298ef488e401a1768cf0e11d8f4ffdaf485ce451fa1e31e1b"
+    },
+    {
+      "name": "imagebind-vision",
+      "path": "models/imagebind_vision.onnx",
+      "task": "embedding",
+      "version": "imagebind-huge-v1",
+      "notes": "ImageBind ViT-Huge vision tower (1024-d). Joint space for image/audio/text. See src/embeddings.py.",
+      "sha256": "ad766489ef663ab579910434a0a3e6fd2ca942fbeac642a6f1a5991025bc398e"
     }
   ],
   "whisper": {

@@ -71,7 +71,9 @@ def check_context(
         threshold=limit,
     )
     try:
-        phash_hex, dhash_hex, pdq_hex, embedding, _pil_for_geo = _hash_media_hybrid(resolved)
+        phash_hex, dhash_hex, pdq_hex, embedding, ib_embedding, _pil_for_geo = _hash_media_hybrid(
+            resolved
+        )
     except RuntimeError as exc:
         result.errors.append(str(exc))
         result.warnings.append("perceptual hashing unavailable; decontextualization check skipped")
@@ -88,6 +90,8 @@ def check_context(
         result.warnings.append(
             "CLIP embeddings unavailable; semantic tier skipped (hash-only mode)"
         )
+    if ib_embedding is None:
+        result.warnings.append("ImageBind embeddings unavailable; joint-space tier skipped")
 
     try:
         if hasattr(active, "search_hybrid"):
@@ -98,6 +102,7 @@ def check_context(
                     pdq_hex=pdq_hex,
                     pdq_threshold=SETTINGS.pdq_threshold,
                     embedding=embedding,
+                    ib_embedding=ib_embedding,
                     clip_threshold=SETTINGS.clip_threshold,
                 )
             )
@@ -157,7 +162,11 @@ def check_context(
 
 
 def _hash_media_hybrid(path: Path):
-    """Return (phash, dhash, pdq_hex, clip_vec, pil_image). Video => middle frame."""
+    """Return (phash, dhash, pdq_hex, clip_vec, ib_vec, pil_image).
+
+    Video => middle frame. Both semantic tiers are signature-gated and may be
+    None when their model is absent (hash-only mode).
+    """
     try:
         import imagehash
         from PIL import Image
@@ -165,15 +174,21 @@ def _hash_media_hybrid(path: Path):
         raise RuntimeError(
             "perceptual hashing needs Pillow+ImageHash (pip install Pillow ImageHash)"
         ) from exc
-    from src.embeddings import clip_image_embedding, pdq_lite_hex
+    from src.embeddings import clip_image_embedding, imagebind_image_embedding, pdq_lite_hex
+
+    def _embed(rgb):
+        return (
+            clip_image_embedding(rgb, SETTINGS.clip_model_path),
+            imagebind_image_embedding(rgb, SETTINGS.imagebind_model_path),
+        )
 
     if not is_video(path):
         with Image.open(path) as img:
             rgb = img.convert("RGB")
             ph, dh = str(imagehash.phash(rgb)), str(imagehash.dhash(rgb))
             pdq = pdq_lite_hex(pil_image=rgb)
-            clip = clip_image_embedding(rgb, SETTINGS.clip_model_path)
-            return ph, dh, pdq, clip, rgb.copy()
+            clip, ib = _embed(rgb)
+            return ph, dh, pdq, clip, ib, rgb.copy()
     try:
         import cv2
     except ImportError as exc:
@@ -196,11 +211,13 @@ def _hash_media_hybrid(path: Path):
         pil = _PILImage.fromarray(rgb_arr)
         import imagehash as _ih
 
+        clip, ib = _embed(pil)
         return (
             str(_ih.phash(pil)),
             str(_ih.dhash(pil)),
             pdq_lite_hex(pil_image=pil),
-            clip_image_embedding(pil, SETTINGS.clip_model_path),
+            clip,
+            ib,
             pil,
         )
     finally:

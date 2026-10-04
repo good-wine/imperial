@@ -38,12 +38,14 @@ defusedxml==0.7.1
 Deprecated==3.0.0
 dirtyjson==1.0.8
 distro==1.9.0
+einops==0.8.2
 fastapi==0.142.2
 filelock==4.0.9
 filetype==1.2.0
 flatbuffers==25.12.19
 frozenlist==1.8.0
 fsspec==2026.9.0
+ftfy==6.3.1
 greenlet==3.5.6
 griffe==2.3.0
 griffecli==2.3.0
@@ -62,6 +64,7 @@ hypothesis==6.168.3
 idna==3.20
 ImageHash==4.3.2
 iniconfig==2.3.0
+iopath==0.1.10
 itsdangerous==2.2.0
 Jinja2==3.1.6
 jiter==0.17.0
@@ -174,6 +177,7 @@ toml==0.10.2
 tomli==2.4.1
 tomli_w==1.2.0
 torch==2.14.1+cpu
+torchaudio==2.11.0
 tqdm==4.70.1
 transformers==5.18.0
 triton==3.8.0

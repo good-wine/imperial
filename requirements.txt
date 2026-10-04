@@ -12,6 +12,7 @@ defusedxml>=0.7
 torch>=2.2
 onnxruntime>=1.17
 onnx>=1.17  # model export only (scripts/export_clip_onnx.py)
+iopath>=0.1.10  # ImageBind export only (scripts/export_imagebind_onnx.py)
 
 # Structured config/logging
 pydantic>=2.0

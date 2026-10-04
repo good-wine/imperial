@@ -432,7 +432,7 @@ def _fingerprint_for_search(case_uuid: str, phash_hex: str) -> tuple[str, str | 
     try:
         from src.modules.context_check import _hash_media_hybrid
 
-        ph, _, pdq, emb, _ = _hash_media_hybrid(Path(ev.get("storage_ref", "")))
+        ph, _, pdq, emb, _ib, _ = _hash_media_hybrid(Path(ev.get("storage_ref", "")))
     except Exception as exc:
         raise HTTPException(422, f"media fingerprint failed: {exc}") from exc
     return ph, pdq, emb

@@ -1,4 +1,4 @@
-"""Offline-first media embeddings: PDQ-lite (DCT 256-bit) + CLIP image vectors.
+"""Offline-first media embeddings: PDQ-lite + CLIP-512 + ImageBind-1024.
 
 - PDQ-lite: 16×16 DCT hash rendered as 64 hex chars. Pure NumPy/Pillow, no
   extra dependency; survives crops/resizes where pHash degrades. Threshold
@@ -7,11 +7,16 @@
   else lazy `transformers` CLIP when installed, else None (hash-only mode).
   CLIP catches semantic reuse — screenshots, memes, recaptures — that no
   perceptual hash survives. Cosine ≥0.90 ≈ same-scene reuse.
+- ImageBind: ONNX `models/imagebind_vision.onnx` (1024-d, L2-normalized).
+  Trained jointly with text and audio, so it holds up on image reuse with
+  text overlays and re-captured frames where CLIP degrades. Signature-gated,
+  ~2.4 GB of external weights: opt out with IMAGEBIND_ENABLED=0.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 import numpy as np
@@ -20,6 +25,9 @@ log = logging.getLogger(__name__)
 
 _CLIP_SESSION = None
 _CLIP_LOADED: bool = False
+_IB_SESSION = None
+_IB_LOADED: bool = False
+_IB_DIM = 1024
 
 
 def pdq_lite_hex(gray_64: np.ndarray | None = None, *, pil_image=None) -> str:
@@ -104,4 +112,61 @@ def clip_image_embedding(
             vec = vec / vec.norm()
         return vec.tolist()
     except Exception:
+        return None
+
+
+def imagebind_image_embedding(
+    pil_image, model_path: str = "models/imagebind_vision.onnx"
+) -> list[float] | None:
+    """1024-d L2-normalized ImageBind vision vector (joint image/text/audio space).
+
+    Complements CLIP-512 in the decontextualization search: ImageBind is
+    trained jointly with text and audio, so it survives image reuse that CLIP
+    degrades on (memes with overlaid text, screenshots, re-captured frames).
+
+    Signature-gated exactly like CLIP: an unsigned or tampered model is
+    refused. Opt-out with IMAGEBIND_ENABLED=0 — the ONNX is 2.4 GB of
+    external weights, so containers that do not need the tier should not pay
+    for loading it (the hash tiers degrade gracefully to hash+CLIP).
+    """
+    global _IB_SESSION, _IB_LOADED
+    if os.getenv("IMAGEBIND_ENABLED", "1") != "1":
+        return None
+    if not _IB_LOADED:
+        _IB_LOADED = True
+        mp = Path(model_path)
+        if mp.is_file():
+            try:
+                from security.signature import gate_model_load
+
+                if not gate_model_load(mp):
+                    log.warning("embeddings: ImageBind refused (bad/missing signature)")
+                    _IB_SESSION = None
+                else:
+                    import onnxruntime as ort
+
+                    from src.device import get_onnx_providers
+
+                    _IB_SESSION = ort.InferenceSession(str(mp), providers=get_onnx_providers())
+                    log.info("embeddings: ImageBind ONNX loaded: %s", mp)
+            except Exception as exc:
+                log.info("embeddings: ImageBind ONNX unavailable (%s)", exc)
+    if _IB_SESSION is None:
+        return None
+    try:
+        from PIL import Image as _Image
+
+        # Matches ImageBind's documented vision transform: bicubic 224 then
+        # CLIP normalization (the model already L2-normalizes internally).
+        rgb = pil_image.convert("RGB").resize((224, 224), _Image.Resampling.BICUBIC)
+        arr = np.asarray(rgb, dtype=np.float32) / 255.0
+        mean = np.array([0.48145466, 0.4578275, 0.40821073], np.float32)
+        std = np.array([0.26862954, 0.26130258, 0.27577711], np.float32)
+        blob = ((arr - mean) / std).transpose(2, 0, 1)[None, ...].astype(np.float32)
+        out = _IB_SESSION.run(None, {_IB_SESSION.get_inputs()[0].name: blob})[0]
+        vec = np.asarray(out).ravel().astype(float)
+        n = float(np.linalg.norm(vec)) + 1e-9
+        return (vec / n).tolist()
+    except Exception as exc:
+        log.warning("embeddings: ImageBind inference failed (%s)", exc)
         return None
