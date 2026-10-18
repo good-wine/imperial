@@ -186,12 +186,18 @@ deterministic risk + ACH + LLM narrative → STIX 2.1`.
   - Auditability: `deepfake_basis` (decisive) and `supporting_evidence`
     (non-specific) are separate lists, so a reviewer can see exactly which
     evidence carried the determination and which did not.
-  - Known gap (measured, not assumed): detection depends on the C2PA
-    `digitalSourceType` value surviving the verifier's nesting depth (it is
-    read from a JSON `manifest_info` blob, parallel to the C2PA SDK's typed
-    result). A real manifest that truncates or re-nests the assertion, or that
-    uses a `digitalSourceType` term outside the mapped families, degrades to
-    `UNMARKED`/`ABSENT` — i.e. it over-reports "no marking", never a false
-    `HUMAN_DECLARED`. Both the extraction depth and the family mapping need
-    confirmation against a real signed manifest before the marking state is
-    relied on for a compliance claim.
+  - Known gap (measured, not assumed): the marking state depends on the C2PA
+    manifest exposing a `digitalSourceType` at all (it is read from a JSON
+    `manifest_info` blob, parallel to the C2PA SDK's typed result, with a
+    recursive walk bounded at `_WALK_MAX_DEPTH`). Matching is done on the
+    terminal name so any URI host (`c2pa.org`, `cv.iptc.org`) and both the
+    pre-/post-2.2 spellings resolve to the same family; ambiguous values
+    (`composite`, retired `softwareImage`, `empty`) and anything unrecognised are
+    reported `UNMARKED` — never a false `HUMAN_DECLARED`. A positive watermark
+    outranks a self-declared non-AI source type (the conflict is surfaced in the
+    evidence), so a manifest cannot suppress marking detection. The residual gap
+    is that a manifest which omits the assertion, or uses a value outside the
+    C2PA/IPTC vocabulary, degrades to `UNMARKED`/`ABSENT` — i.e. it over-reports
+    "no marking", never a false human original — which should be confirmed
+    against a real signed manifest before the marking state is relied on for a
+    compliance claim.

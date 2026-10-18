@@ -53,19 +53,65 @@ AI_ACT_MARKING_TRANSITION_END = "2026-12-02"  # Art. 50(2) transitional relief
 CODE_OF_PRACTICE_DATE = "2026-07-31"
 GUIDELINES_DATE = "2026-07-20"
 
-# C2PA digitalSourceType values (2.2+ URIs; the older short forms are accepted).
+# C2PA/IPTC `digitalSourceType` terminal names (C2PA 2.2+ / IPTC CV). The URI
+# host differs — C2PA-specific values live under `c2pa.org`, the vocabulary
+# under `cv.iptc.org` — and C2PA 2.2 renamed `trainedAlgorithmicData` →
+# `trainedAlgorithmicMedia`, so matching is done on the *terminal segment*
+# (`_terminal`), never on the full URI. Source: C2PA Technical Specification
+# §digitalSourceType + IPTC Digital Source Type vocabulary (as serialised by
+# the C2PA Rust SDK `DigitalSourceType`).
+#: Values that assert the media itself was produced by a trained model.
 C2PA_AI_GENERATED = (
-    "http://c2pa.org/digitalsourcetype/trainedalgorithmicdata",
-    "c2pa.trainedAlgorithmicData",
+    "trainedalgorithmicmedia",  # IPTC: model trained on captured content
+    "trainedalgorithmicdata",  # pre-2.2 C2PA name, still emitted by older tools
 )
+#: Values that assert a generative-AI element or operation (composite/edit).
+#: `virtualRecording` ("live virtual event based on generative AI *and/or*
+#: captured elements") is included because it *may* be generative: for a marking
+#: determination the safe direction is to surface a possible AI marker, not to
+#: hide it.
 C2PA_AI_MODIFIED = (
-    "http://c2pa.org/digitalsourcetype/digitalcreation",
-    "c2pa.digitalCreation",
+    "compositesynthetic",  # composite, at least one element is generative AI
+    "compositewithtrainedalgorithmicmedia",  # generative inpainting/outpainting
+    "virtualrecording",  # live virtual event based on generative AI and/or captures
 )
-C2PA_UNMARKED_HUMAN = (
-    "http://c2pa.org/digitalsourcetype/digitalcapture",
-    "c2pa.digitalCapture",
+#: Values that explicitly assert a *non-generative* origin (capture, analogue
+#: digitisation, human/algorithmic creation). Only these may be reported as
+#: HUMAN_DECLARED. Agnostic/ambiguous values are deliberately excluded and fall
+#: through to UNMARKED: `composite` ("any element *may or may not* be generative
+#: AI"), the retired `softwareImage`, and `empty` do **not** assert a human
+#: original. An unrecognised value is likewise UNMARKED, never "human original".
+C2PA_HUMAN_DECLARED = (
+    "digitalcapture",  # direct camera capture
+    "computationalcapture",  # multi-frame merge / HDR, non-generative
+    "compositecapture",  # composite of captures only (all real scenes)
+    "algorithmicallyenhanced",  # non-generative enhancement of a capture
+    "negativefilm",
+    "positivefilm",
+    "print",
+    "humanedits",
+    "minorhumanedits",
+    "digitalcreation",
+    "digitalart",
+    "algorithmicmedia",  # algorithmic, but no trained model
+    "datadrivenmedia",
+    "screencapture",
 )
+
+#: Known C2PA/IPTC values that assert *neither* AI generation *nor* a human
+#: original (e.g. `composite` "any element may or may not be generative AI",
+#: the retired `softwareImage`, and `empty`). Reported UNMARKED with an
+#: AI-agnostic evidence line — not silently lumped in with unknown values.
+C2PA_AGNOSTIC = (
+    "composite",
+    "softwareimage",
+    "empty",
+)
+
+#: Recursion bound for the manifest walk. Real manifests nest ingredients and
+#: assertions several levels deep; the previous bound (6) could stop before an
+#: ingredient's `digitalSourceType`, silently degrading the marking to UNMARKED.
+_WALK_MAX_DEPTH = 12
 
 # Marking states. PRESENT_UNMARKED is deliberately distinct from
 # PRESENT_HUMAN: a claim that is present but not AI-flavoured proves the
@@ -181,7 +227,7 @@ def _walk(node: Any, key: str, depth: int = 0, acc: list[Any] | None = None) -> 
     """Collect every value of `key` in a nested manifest structure."""
     if acc is None:
         acc = []
-    if depth > 6:
+    if depth > _WALK_MAX_DEPTH:
         return acc
     if isinstance(node, dict):
         for k, v in node.items():
@@ -192,6 +238,19 @@ def _walk(node: Any, key: str, depth: int = 0, acc: list[Any] | None = None) -> 
         for v in node:
             _walk(v, key, depth + 1, acc)
     return acc
+
+
+def _terminal(value: Any) -> str:
+    """Terminal name of a digitalSourceType, host- and form-agnostic.
+
+    `http://c2pa.org/digitalsourcetype/trainedAlgorithmicMedia`,
+    `http://cv.iptc.org/newscodes/digitalsourcetype/digitalCapture` and the
+    bare `c2pa.trainedAlgorithmicMedia` all reduce to their terminal segment
+    (`trainedalgorithmicmedia`, `digitalcapture`), so the family sets match
+    regardless of host or the 2.2 rename.
+    """
+    s = str(value or "").strip().rstrip("/")
+    return re.split(r"[/#.]", s)[-1].lower()
 
 
 def extract_digital_source_types(manifest_info: dict[str, Any] | None) -> list[str]:
@@ -232,24 +291,24 @@ def detect_marking(
     """
     evidence: list[str] = []
     info = getattr(c2pa_result, "manifest_info", None) or {}
-    srcs = {_norm(s) for s in extract_digital_source_types(info)}
+    # Match on the terminal name so any URI host (`c2pa.org`, `cv.iptc.org`)
+    # and both the pre-/post-2.2 spellings resolve to the same family.
+    srcs = {_terminal(s) for s in extract_digital_source_types(info)}
     created_by = extract_created_by(info)
 
-    if srcs & {_norm(s) for s in C2PA_AI_GENERATED} or re.search(
-        r"trainedAlgorithmicData", created_by, re.IGNORECASE
-    ):
+    if srcs & set(C2PA_AI_GENERATED):
         evidence.append(f"C2PA digitalSourceType declares AI generation: {sorted(srcs)}")
         if created_by:
             evidence.append(f"C2PA createdBy: {created_by}")
         return "AI_GENERATED", evidence, "C2PA digitalSourceType (2.2+)"
 
-    if srcs & {_norm(s) for s in C2PA_AI_MODIFIED}:
+    if re.search(r"trainedAlgorithmic(?:Data|Media)", created_by, re.IGNORECASE):
+        evidence.append(f"C2PA createdBy names a trained model: {created_by}")
+        return "AI_GENERATED", evidence, "C2PA digitalSourceType (2.2+)"
+
+    if srcs & set(C2PA_AI_MODIFIED):
         evidence.append(f"C2PA digitalSourceType declares digital creation: {sorted(srcs)}")
         return "AI_MODIFIED", evidence, "C2PA digitalSourceType (2.2+)"
-
-    if getattr(c2pa_result, "has_manifest", False) and srcs:
-        evidence.append(f"C2PA digitalSourceType present, no AI value: {sorted(srcs)}")
-        return "HUMAN_DECLARED", evidence, "C2PA digitalSourceType (2.2+)"
 
     # A watermark is also a machine-readable marker: C2PA soft binding and the
     # SynthID-style invisible watermarks the Commission points at. These are the
@@ -258,19 +317,45 @@ def detect_marking(
     # "NOT_CHECKED"). Reading truthiness of that string, or of the keys
     # `detected`/`soft_binding` that no producer emits, marked every analysed
     # file as AI-generated.
+    #
+    # This check deliberately precedes the HUMAN_DECLARED return below: a
+    # manifest that self-declares a non-AI source cannot suppress a positive
+    # watermark, or a producer could defeat marking detection by attaching an
+    # innocuous `digitalSourceType` (a real self-declared "human" asset carrying
+    # an AI watermark is exactly what an analyst must see).
+    markers: list[str] = []
     if watermark:
-        markers: list[str] = []
         if watermark.get("ai_generated") is True:
             markers.append(str(watermark.get("generator") or "generative-tool metadata"))
         if str(watermark.get("synthid", "")).upper() == "DETECTED":
             markers.append("SynthID pixel watermark")
-        if markers:
-            evidence.append(f"machine-readable marker present: {', '.join(markers)}")
-            return "AI_GENERATED", evidence, "C2PA soft binding / invisible watermark"
+    if markers:
+        if getattr(c2pa_result, "has_manifest", False) and srcs & set(C2PA_HUMAN_DECLARED):
+            evidence.append(
+                "conflict: C2PA declares a non-AI digitalSourceType but an AI watermark is "
+                "present — the watermark takes precedence for Art. 50(2) marking"
+            )
+        evidence.append(f"machine-readable marker present: {', '.join(markers)}")
+        return "AI_GENERATED", evidence, "C2PA soft binding / invisible watermark"
+
+    if getattr(c2pa_result, "has_manifest", False) and srcs & set(C2PA_HUMAN_DECLARED):
+        evidence.append(f"C2PA digitalSourceType present, no AI value: {sorted(srcs)}")
+        return "HUMAN_DECLARED", evidence, "C2PA digitalSourceType (2.2+)"
 
     if getattr(c2pa_result, "has_manifest", False):
-        evidence.append("C2PA manifest present but declares no digitalSourceType")
-        return "UNMARKED", evidence, "C2PA manifest (no digitalSourceType)"
+        if srcs & set(C2PA_AGNOSTIC):
+            evidence.append(
+                f"C2PA manifest declares an AI-agnostic digitalSourceType (neither AI nor a "
+                f"human original): {sorted(srcs & set(C2PA_AGNOSTIC))}"
+            )
+        if srcs - set(C2PA_AGNOSTIC):
+            evidence.append(
+                f"C2PA manifest declares an unrecognised digitalSourceType (not treated as a "
+                f"human original): {sorted(srcs - set(C2PA_AGNOSTIC))}"
+            )
+        if not srcs:
+            evidence.append("C2PA manifest present but declares no digitalSourceType")
+        return "UNMARKED", evidence, "C2PA manifest (no AI digitalSourceType)"
 
     evidence.append("no C2PA manifest and no watermark detected: no machine-readable marking")
     return "ABSENT", evidence, "none detected"
@@ -371,9 +456,11 @@ def _manipulation_signals(
     sig: list[str] = []
     supporting: list[str] = []
 
-    marking, mark_ev, _ = detect_marking(c2pa_result, watermark)
+    marking, mark_ev, marking_standard = detect_marking(c2pa_result, watermark)
     if marking in {"AI_GENERATED", "AI_MODIFIED"}:
-        sig.append(f"machine-readable declaration: {marking}")
+        # Name the *source* (declared digitalSourceType vs detected watermark):
+        # a detected watermark is not a producer declaration.
+        sig.append(f"machine-readable marking ({marking}): {marking_standard}")
         sig.extend(mark_ev)
 
     # Dedicated media legs, read from their real result contracts. The previous
@@ -551,7 +638,7 @@ def assess(
     res.deepfake_confidence = "High" if marking in {"AI_GENERATED", "AI_MODIFIED"} else "Moderate"
     if res.deepfake_confidence == "High":
         res.deepfake_basis.append(
-            "subject class present AND content self-declares as AI-generated/modified"
+            f"subject class present AND a machine-readable AI marker is present ({standard})"
         )
 
     return _finalize(

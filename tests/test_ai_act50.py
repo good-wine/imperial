@@ -123,6 +123,106 @@ def test_digital_source_type_walks_nested_ingredients():
     assert detect_marking(c2pa)[0] == "AI_GENERATED"  # strongest source type wins
 
 
+def test_digital_source_type_matches_terminal_regardless_of_host():
+    """C2PA-specific values live under c2pa.org, the IPTC vocabulary under
+    cv.iptc.org, and 2.2 renamed trainedAlgorithmicData -> trainedAlgorithmicMedia;
+    matching on the terminal segment must survive all three."""
+    from src.modules.ai_act50 import _terminal
+
+    assert (
+        _terminal("http://c2pa.org/digitalsourcetype/trainedAlgorithmicMedia")
+        == "trainedalgorithmicmedia"
+    )
+    assert (
+        _terminal("http://cv.iptc.org/newscodes/digitalsourcetype/digitalCapture")
+        == "digitalcapture"
+    )
+    assert _terminal("c2pa.digitalCreation") == "digitalcreation"
+
+    iptc = _c2pa()
+    iptc.manifest_info = {
+        "manifest": {
+            "assertions": [
+                {
+                    "digitalSourceType": (
+                        "http://cv.iptc.org/newscodes/digitalsourcetype/trainedAlgorithmicMedia"
+                    )
+                }
+            ]
+        }
+    }
+    iptc.has_manifest = True
+    assert detect_marking(iptc)[0] == "AI_GENERATED"
+
+    composite = _c2pa()
+    composite.manifest_info = {
+        "assertions": [
+            {
+                "digitalSourceType": (
+                    "http://cv.iptc.org/newscodes/digitalsourcetype/compositeSynthetic"
+                )
+            }
+        ]
+    }
+    composite.has_manifest = True
+    assert detect_marking(composite)[0] == "AI_MODIFIED"
+
+
+def test_unknown_declared_source_type_is_not_reported_as_human():
+    """An unrecognised digitalSourceType is UNMARKED, never HUMAN_DECLARED:
+    a claim we do not understand is not evidence of a human original."""
+    c = _c2pa()
+    c.manifest_info = {"assertions": [{"digitalSourceType": "http://example.org/x/novelThing"}]}
+    c.has_manifest = True
+    state, ev, _ = detect_marking(c)
+    assert state == "UNMARKED" and any("unrecognised" in e for e in ev)
+
+
+def test_deeply_nested_ingredient_is_found():
+    """The walk bound must reach an ingredient-level digitalSourceType."""
+    deep: dict = {"digitalSourceType": "c2pa.trainedAlgorithmicMedia"}
+    for _ in range(9):
+        deep = {"ingredient": deep}
+    c = _c2pa()
+    c.manifest_info = deep
+    c.has_manifest = True
+    assert detect_marking(c)[0] == "AI_GENERATED"
+
+
+def test_ambiguous_source_type_is_unmarked_not_human():
+    """`composite` ("any element *may or may not* be generative AI") and the
+    retired `softwareImage`/`empty` do not assert a human original."""
+    for value in ("composite", "softwareImage", "empty"):
+        c = _c2pa(value)
+        state, ev, _ = detect_marking(c)
+        assert state == "UNMARKED", value
+        # Named as AI-agnostic (a known vocabulary term), not "unrecognised".
+        assert any("AI-agnostic" in e for e in ev), value
+        assert not any("unrecognised" in e for e in ev), value
+    # A genuine non-generative capture family member stays HUMAN_DECLARED.
+    assert detect_marking(_c2pa("algorithmicallyEnhanced"))[0] == "HUMAN_DECLARED"
+
+
+def test_watermark_outranks_self_declared_human_source():
+    """A manifest cannot suppress a positive watermark by declaring a non-AI
+    source type; the conflict is reported instead of resolving to human."""
+    c = _c2pa("digitalCapture")
+    state, ev, _ = detect_marking(c, {"ai_generated": True, "generator": "Midjourney"})
+    assert state == "AI_GENERATED"
+    assert any("conflict" in e for e in ev)
+
+
+def test_source_type_only_reports_declared_values_in_evidence():
+    """The AI_GENERATED evidence must not claim a digitalSourceType when only
+    `createdBy` named the model."""
+    c = _c2pa(created_by="Adobe Firefly trainedAlgorithmicMedia")
+    c.manifest_info = {"assertions": [{"createdBy": "trainedAlgorithmicMedia"}]}
+    c.has_manifest = True
+    state, ev, _ = detect_marking(c)
+    assert state == "AI_GENERATED"
+    assert any("createdBy names a trained model" in e for e in ev)
+
+
 # ----------------------------------------------------------- assessment
 
 
