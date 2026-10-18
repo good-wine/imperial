@@ -45,3 +45,7 @@ models/whisper/
 .idea/
 .vscode/
 *.swp
+
+# Rust build artifacts (crate is gated by CI's `rust` job, not by make gate)
+rust/**/target/
+rust/**/Cargo.lock

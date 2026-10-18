@@ -23,8 +23,9 @@ worker (`worker.py`), Streamlit console (`dashboard/`). Read
   `needs_gpu`, `needs_net`); only `slow` is currently applied.
 - `make migrate` (Alembic) is the only sanctioned DDL path for Postgres.
   Fresh boots use `create_all()`; `migrations/` mirrors `src/models.py`.
-- Rust crate `rust/provenance-jumbf`: run `cargo test` there. It is excluded
-  from ruff/mypy/bandit and from CI — nothing gates it but you.
+- Rust crate `rust/provenance-jumbf`: run `cargo test` there (must stay
+  `cargo fmt`-clean). Excluded from ruff/mypy/bandit; gated by CI's separate
+  `rust` job, not by `make gate`.
 - Model weights are gitignored and provisioned, never committed. Every model
   needs a `.sig` (Ed25519, `scripts/sign_models.py`) and a pin in
   `models/registry.json`; check with `make verify-weights` (`--no-cache`

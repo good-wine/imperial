@@ -72,9 +72,7 @@ pub fn parse_mp4_tree(head: &[u8]) -> Vec<JumbfNode> {
             }
         }
         // Nested scan one level for moov/meta/udta containers.
-        if (boxtype == b"moov" || boxtype == b"meta" || boxtype == b"udta")
-            && size < 4_000_000
-        {
+        if (boxtype == b"moov" || boxtype == b"meta" || boxtype == b"udta") && size < 4_000_000 {
             let end = (i + size).min(head.len());
             let mut j = i + 8;
             while j + 8 <= end && nodes.len() < 64 {
@@ -131,7 +129,12 @@ pub fn scan_jpeg_segments(head: &[u8]) -> Vec<JumbfNode> {
         }
         let marker = head[i + 1];
         if marker == 0xD9 || marker == 0xDA {
-            nodes.push(JumbfNode { marker: "EOI/SOS".into(), offset: i, size: 2, is_c2pa: false });
+            nodes.push(JumbfNode {
+                marker: "EOI/SOS".into(),
+                offset: i,
+                size: 2,
+                is_c2pa: false,
+            });
             break;
         }
         let seg_len = u16::from_be_bytes([head[i + 2], head[i + 3]]) as usize;
@@ -147,7 +150,12 @@ pub fn scan_jpeg_segments(head: &[u8]) -> Vec<JumbfNode> {
         } else {
             format!("M{marker:02X}")
         };
-        nodes.push(JumbfNode { marker: label, offset: i, size: seg_len + 2, is_c2pa });
+        nodes.push(JumbfNode {
+            marker: label,
+            offset: i,
+            size: seg_len + 2,
+            is_c2pa,
+        });
         if is_c2pa {
             break;
         }
@@ -175,7 +183,9 @@ mod tests {
         jpg.extend_from_slice(b"JUMBF\x00c2pa");
         jpg.extend_from_slice(&[0xFF, 0xD9]);
         let nodes = scan_jpeg_segments(&jpg);
-        assert!(nodes.iter().any(|n| n.is_c2pa && n.marker == "jpeg-APP11-JUMBF"));
+        assert!(nodes
+            .iter()
+            .any(|n| n.is_c2pa && n.marker == "jpeg-APP11-JUMBF"));
     }
 
     #[test]

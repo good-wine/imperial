@@ -33,3 +33,12 @@ jobs:
         run: make coverage
       - name: Adversarial eval
         run: make eval
+
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Format check
+        run: cargo fmt --manifest-path rust/provenance-jumbf/Cargo.toml --check
+      - name: Rust tests (provenance-jumbf)
+        run: cargo test --manifest-path rust/provenance-jumbf/Cargo.toml
