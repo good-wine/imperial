@@ -145,3 +145,53 @@ deterministic risk + ACH + LLM narrative → STIX 2.1`.
   `data/prnu/`), trust pinning (`scripts/pin_trust_anchor.py`), OIDC
   (Keycloak `--profile sso`, `OIDC_ISSUER`), SIEM (`GET /export/siem`),
   calibration (`scripts/calibrate_ensemble.py`), rate-limit + `/metrics`.
+- v5.1 — EU AI Act Art. 50 (`src/modules/ai_act50.py`). Art. 50 is a
+  *different question* from authenticity, so it gets its own assessment
+  rather than a field derived from the risk score. The risk verdict answers
+  "is this authentic?"; Art. 50 answers "is it machine-readably marked, and
+  must a human see a label?" Conflating them produces exactly the wrong
+  output — a low-risk authentic photo is not thereby compliant, and a
+  high-risk one is not thereby a deep fake. `assess()` runs on every report
+  (both `generate_report()` and `aggregate_report()`), never by the LLM.
+  - The assessment is deliberately conservative in three places:
+    - **ABSENT marking is never reported as a human original.** Marking is
+      not universal in real media, so `HUMAN_DECLARED` (a non-AI
+      `digitalSourceType` is declared) and `UNMARKED`/`ABSENT` (no AI claim
+      found) are distinct states, and `marking_evidence` always states which.
+    - **Generic forensic anomaly cannot establish Art. 3(60).** An ELA or
+      spectral score is raised just as much by recompression and rescaling,
+      so it lands in `supporting_evidence` and yields
+      `deepfake=None / "Indeterminate"`, not `True`. Only a self-declaration
+      (C2PA `digitalSourceType: trainedAlgorithmicData`, watermark) or a
+      dedicated media leg (lipsync/vocoder) is decisive.
+    - **Carve-outs are declared, never silently applied.** The Art. 50(4)
+      law-enforcement exemption sets `disclosure_required=None` and records
+      `exemption` with the reminder that the module cannot verify the
+      operator's authorisation. `legal_advice: false` ships in every payload.
+  - Surfaced in all four outputs so an exporter cannot drift from the
+    analyst's screen: `report.ai_act50` (schema v2 JSON), the markdown
+    `## EU AI Act Art. 50 transparency` block (with the required label text,
+    so the exported report is itself a compliant disclosure carrier),
+    `x_ai_act50` on the STIX `opinion` object, and the API. The dedicated
+    `GET /api/v1/cases/{uuid}/transparency` returns just the marking state,
+    disclosure duty and a ready-to-render accessible SVG badge, which is what
+    a publication pipeline needs to decide whether to render a label. The block
+    is field-scoped at the *served* record level: the compliance duty (marking,
+    disclosure requirement, label/badge) is served at every level, while
+    `deepfake`, `depicted_subject` and the operator posture/`exemption` wording
+    are withheld above GREEN and named in a `withheld_fields` list, so a
+    consumer never reads a withheld field as "assessed: none". The STIX bundle
+    and the SIEM export still carry the determination: they are case-TLP-gated
+    export paths, not the per-requester API payload.
+  - Auditability: `deepfake_basis` (decisive) and `supporting_evidence`
+    (non-specific) are separate lists, so a reviewer can see exactly which
+    evidence carried the determination and which did not.
+  - Known gap (measured, not assumed): detection depends on the C2PA
+    `digitalSourceType` value surviving the verifier's nesting depth (it is
+    read from a JSON `manifest_info` blob, parallel to the C2PA SDK's typed
+    result). A real manifest that truncates or re-nests the assertion, or that
+    uses a `digitalSourceType` term outside the mapped families, degrades to
+    `UNMARKED`/`ABSENT` — i.e. it over-reports "no marking", never a false
+    `HUMAN_DECLARED`. Both the extraction depth and the family mapping need
+    confirmation against a real signed manifest before the marking state is
+    relied on for a compliance claim.

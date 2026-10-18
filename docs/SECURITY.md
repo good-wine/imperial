@@ -13,6 +13,29 @@ stripped by `redact()` (narrative/hashes leave AMBER+, everything but
 verdict leaves RED). The classification travels in the payload; the full
 record stays server-side + audit.
 
+`GET /api/v1/cases/{uuid}/transparency` is clearance-gated on the case TLP
+(`_require_clearance`) and audit-logged (`ai_act50.transparency_read`). The
+Art. 50 block is assembled by `_ai_act50_payload()` and field-scoped at the
+*served* record level (the same level `redact()` uses for `result` in the same
+response): the *compliance duty* (marking state, disclosure requirement,
+label/badge) is served at every level, while `deepfake`, `depicted_subject` and
+the operator posture/`exemption` wording are withheld above GREEN and named in
+a `withheld_fields` list. Note the duty is not neutral information — a present
+`disclosure_required` implies the deep-fake determination; the field scoping
+removes the *subject* and *operator* intelligence, not the obligation. The same
+block is attached to `GET /api/v1/cases/{uuid}` (top-level `ai_act50`, served
+level) and, inside `result`, only survives at CLEAR/GREEN (`src/tlp.py`). The
+STIX bundle and the SIEM export DO carry the determination: they are
+case-TLP-gated export paths, not the per-requester API payload — stated here so
+that no one reads the API scoping as a property of every output surface.
+
+Caveat, stated plainly: TLP clearance is **requester-declared** (`X-TLP`
+header or `clearance` param) with no identity binding on the published API
+port. TLP is a handling caveat, not an access control; binding clearance to an
+identity (gateway-injected header, mTLS/oauth2-proxy, or `ports` bound to
+loopback) is a deployment concern recorded as a known gap, not something these
+endpoints enforce.
+
 ## Chain of custody (ISO/IEC 27037)
 SHA-256 at ingestion, UTC timestamps, handler/owner, transfer log on
 Evidence rows; hash-chained append-only audit in PostgreSQL

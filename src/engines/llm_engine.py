@@ -13,6 +13,7 @@ from typing import Any
 
 from src.config import SETTINGS
 from src.engines.forensics_engine import multimodal_risk_bump
+from src.modules.ai_act50 import assess
 from src.modules.explain_report import (
     analytic_confidence,
     build_hypotheses,
@@ -60,9 +61,20 @@ def aggregate_report(
             "claimed time/place vs shadows"
         )
     verdict = score_to_verdict(score)
+    # Single Art. 50 assessment for this report: computed here with the
+    # multimodal evidence the CLI path lacks, then handed to the tradecraft
+    # generator, so the same file is never assessed twice with different
+    # inputs (and the disclosure recommendation is not emitted twice).
+    ai_act50_result = assess(
+        c2pa,
+        forensic,
+        context,
+        watermark=multi.get("watermark"),
+        multi=multi,
+    )
     # Reuse the tradecraft generator for narrative/hypotheses, then upgrade
     # the score-dependent fields deterministically (LLM never re-scores).
-    tmp = _gen(c2pa, forensic, context, llm=llm)
+    tmp = _gen(c2pa, forensic, context, llm=llm, ai_act50=ai_act50_result)
     hyps = build_hypotheses(c2pa, forensic, context, score)
     conf = analytic_confidence(c2pa, forensic, context)
     if geoint is not None and geoint.available and conf == "High" and geoint.confidence < 0.5:
@@ -71,6 +83,18 @@ def aggregate_report(
     findings = list(factors)
     if geoint is not None and geoint.available and geoint.consistent is False:
         findings.append("GEOINT: shadow geometry contradicts claimed capture time/place.")
+
+    # `tmp.recommendations` already carries the Art. 50(4) recommendation from
+    # the shared assessment above; inserting it here again duplicated it.
+    recommendations = list(tmp.recommendations)
+    if ai_act50_result.machine_readable_marking == "ABSENT":
+        findings.append(
+            "Art. 50(2): no machine-readable marking detected — absence of a marker is not "
+            "evidence of a human original."
+        )
+    if ai_act50_result.exemption:
+        findings.append(f"AI Act carve-out declared: {ai_act50_result.exemption}")
+
     multi_notes = {
         "audio": (multi.get("audio") or {}),
         "lipsync": (multi.get("lipsync") or {}),
@@ -92,13 +116,14 @@ def aggregate_report(
             else tmp.executive_summary.replace(f"Risk {tmp.risk_score}/100", f"Risk {score}/100")
         ),
         findings=findings,
-        recommendations=list(tmp.recommendations),
+        recommendations=recommendations,
         narrative=tmp.narrative,
         llm_backend=tmp.llm_backend,
         c2pa=tmp.c2pa,
         forensic=tmp.forensic,
         context=tmp.context,
         multimodal=multi_notes,
+        ai_act50=ai_act50_result.to_dict(),
         hypotheses=[h.to_dict() for h in hyps],
         analytic_confidence=conf,
         tlp=SETTINGS.tlp,
@@ -120,6 +145,7 @@ def aggregate_report(
             + ". "
             + rep.executive_summary
         )
+    rep.executive_summary = f"{rep.executive_summary} {ai_act50_result.summary}"
     log.info("llm-engine: risk=%d verdict=%s (base=%d)", score, verdict.value, base)
     return rep
 

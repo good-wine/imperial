@@ -235,6 +235,103 @@ def _parse_geoint(
         raise HTTPException(400, "bad geoint floats") from exc
 
 
+def _ai_act50_payload(report: dict, clearance: str = "TLP:CLEAR") -> dict:
+    """Art. 50 transparency block for API consumers (see docs/ARCHITECTURE.md).
+
+    Returns an explicit `available: false` shape when no assessment is
+    present, so a client never has to distinguish "absent" from "empty" —
+    and never mistakes a missing assessment for "no marking found".
+
+    Field-scoped by clearance like the rest of the record: the *compliance
+    fact* (marking state, disclosure duty, label/badge) is served at every
+    level, but the case-intelligence fields (`deepfake`, `depicted_subject`),
+    the operator posture and the carve-out prose are only served where the
+    report's own `result` would have carried them (CLEAR/GREEN). Serving them
+    beside a RED-redacted `result` leaked them past the TLP boundary.
+    """
+    a = report.get("ai_act50") or {}
+    if not a:
+        return {
+            "available": False,
+            "note": "no Art. 50 assessment recorded for this report "
+            "(pre-v2 schema or analysis predates the module)",
+        }
+    out = {
+        "available": True,
+        "machine_readable_marking": a.get("machine_readable_marking", "ABSENT"),
+        "marking_standard": a.get("marking_standard", ""),
+        "marking_present": bool(a.get("marking_present")),
+        "deepfake": a.get("deepfake"),
+        "deepfake_confidence": a.get("deepfake_confidence", "Indeterminate"),
+        "disclosure_required": a.get("disclosure_required"),
+        "label_text": a.get("label_text", ""),
+        "icon_variant": a.get("icon_variant", ""),
+        "disclosure_timing": a.get("disclosure_timing", "at_first_exposure"),
+        "depicted_subject": a.get("depicted_subject") or [],
+        "false_appearance_risk": a.get("false_appearance_risk", "unknown"),
+        "exemption": a.get("exemption", ""),
+        "operator_posture": a.get("operator_posture") or {},
+        "legal_advice": bool(a.get("legal_advice", False)),
+        "references": a.get("references") or [],
+    }
+    # The disclosure badge is a self-contained SVG; serve it so an operator
+    # can render the required human-facing label without reimplementing it.
+    badge = _disclosure_badge(a)
+    if badge:
+        out["disclosure_badge_svg"] = badge
+        # Guard against publishing the wrong graphic believing it complies.
+        # The EU icons are optional and the AI Office states that using them
+        # does not establish compliance by itself; this is an *equivalent*
+        # label (plain-language + accessible), not the official icon set.
+        out["official_eu_icon"] = False
+        out["badge_note"] = (
+            "Equivalent label, not the official EU AI icon set. The icon set is "
+            "optional and its use does not establish compliance by itself; what "
+            "Art. 50(5) requires is a clear, distinguishable, accessible "
+            "disclosure at first exposure."
+        )
+    # Above GREEN, serve the compliance duty but withhold case intelligence and
+    # operator posture: `depicted_subject`/`deepfake` are facts about the media
+    # content, `operator_posture`/`exemption` about the deployment. The withheld
+    # keys are named in the payload so a consumer can tell "withheld" from
+    # "assessed as absent" instead of reading fabricated defaults.
+    from src.tlp import normalize
+
+    if normalize(clearance) not in ("TLP:CLEAR", "TLP:GREEN"):
+        withheld = (
+            "deepfake",
+            "deepfake_confidence",
+            "depicted_subject",
+            "false_appearance_risk",
+            "exemption",
+            "operator_posture",
+        )
+        for hidden in withheld:
+            out.pop(hidden, None)
+        out["restricted"] = True
+        out["withheld_fields"] = list(withheld)
+    return out
+
+
+def _disclosure_badge(ai_act50: dict) -> str | None:
+    """Badge SVG from a stored assessment dict; None when none is required.
+
+    Tolerates older/unknown keys: the payload is what is on disk, and an
+    unexpected shape must degrade to "no badge", never 500 a compliance read.
+    """
+    from dataclasses import fields
+
+    from src.modules.ai_act50 import AiAct50Result, render_disclosure_badge
+
+    known = {f.name for f in fields(AiAct50Result)}
+    try:
+        res = AiAct50Result(**{k: v for k, v in ai_act50.items() if k in known})
+    except (TypeError, ValueError) as exc:
+        log.warning("ai_act50: unusable stored assessment (%s); badge withheld", exc)
+        return None
+    return render_disclosure_badge(res)
+
+
 def _get_case_or_404(repo, case_uuid: str) -> dict:
     """Fetch a case or raise the canonical 404 (single choke point)."""
     case = repo.get_case(case_uuid)
@@ -388,6 +485,40 @@ def _register_cases(api: FastAPI, ctx: _ApiCtx) -> None:
         ]
         return JSONResponse({"cases": rows, "returned": len(rows)})
 
+    @api.get("/api/v1/cases/{case_uuid}/transparency")
+    def get_transparency(
+        case_uuid: str,
+        clearance: str = "TLP:CLEAR",
+        x_tlp: str | None = Header(None, alias="X-TLP"),
+    ) -> JSONResponse:
+        """Art. 50(2) marking state + Art. 50(4) disclosure duty, machine-readable.
+
+        Separate from the full result because this is the field an automated
+        publication pipeline needs to decide whether to render a label; it
+        carries no case narrative and no raw forensic signal.
+        """
+        from src.database import get_repository
+
+        clr = _clearance(x_tlp, clearance)
+        repo = get_repository()
+        case = _get_case_or_404(repo, case_uuid)
+        _require_clearance(clr, case.get("tlp", "TLP:CLEAR"), "transparency fetch")
+        res = repo.latest_result(case_uuid)
+        if not res:
+            raise HTTPException(409, "analysis not complete yet")
+        import json as _json
+
+        # The block is served at the *record* level, like `result` here: the
+        # requester is already guaranteed to dominate the case TLP above.
+        payload = _ai_act50_payload(_json.loads(res["report_json"]), case.get("tlp", "TLP:CLEAR"))
+        repo.audit(
+            actor="api",
+            action="ai_act50.transparency_read",
+            case_uuid=case_uuid,
+            detail={"marking": payload.get("machine_readable_marking", "n/a")},
+        )
+        return JSONResponse(payload)
+
     @api.get("/api/v1/cases/{case_uuid}")
     def get_case(
         case_uuid: str,
@@ -412,10 +543,18 @@ def _register_cases(api: FastAPI, ctx: _ApiCtx) -> None:
             import json as _json
 
             report = _json.loads(res["report_json"])
-            # TLP-aware detail: higher-TLP records served at requester level.
+            # TLP-aware detail: the level the record is served at (a requester
+            # cleared above the case TLP still reads case-level detail). The
+            # Art. 50 block uses the same effective level, so the payload can
+            # never contradict `result` in the same response.
             level = case.get("tlp", "TLP:CLEAR") if allows("TLP:RED", clr) else clr
-            payload["result"] = redact(report, clr if not allows(clr, "TLP:GREEN") else level)
+            served = clr if not allows(clr, "TLP:GREEN") else level
+            payload["result"] = redact(report, served)
             payload["stix_ready"] = bool(res.get("stix_json"))
+            # Art. 50 transparency metadata stays visible at every clearance:
+            # the marking state is a compliance fact about the media, not
+            # case intelligence. `redact()` is still applied to `result`.
+            payload["ai_act50"] = _ai_act50_payload(report, served)
         payload["audit"] = repo.audit_for(case_uuid)
         return JSONResponse(payload)
 

@@ -97,6 +97,30 @@ _STRINGS: dict[str, dict[str, str]] = {
         "review.forensic_caption": ("anomaly {a} · {n} frame(s) · {d} · onnx={o} · temporal={t}"),
         "review.mp4_caption": "MP4 atoms: {n} · faststart={f} · double-compression hint {h}",
         "review.ai_generated": "AI-generated: {v} · generator: {g} · SynthID: {s}",
+        "review.act50_title": "EU AI Act Art. 50 transparency",
+        "review.act50_determination": "Determination: {d} (confidence {c})",
+        "review.act50_marking": "Machine-readable marking: {m} via {s}",
+        "review.act50_disclosure": "Disclosure required: {r}",
+        "review.act50_label": "Label text: {l}",
+        "review.act50_subjects": "Depicted subjects: {s}",
+        "review.act50_audience": "False-appearance risk (audience-aware): {r}",
+        "review.act50_exemption": "Carve-out declared: {e}",
+        "review.act50_deepfake": "deep fake",
+        "review.act50_not_deepfake": "not a deep fake",
+        "review.act50_indeterminate": "indeterminate",
+        "review.act50_yes": "yes",
+        "review.act50_no": "no",
+        "review.act50_undetermined": "not determined (carve-out or indeterminate)",
+        "review.act50_none": "none",
+        "review.act50_no_standard": "no standard detected",
+        "review.act50_restricted": (
+            "Determination detail (subjects, confidence, carve-out) withheld at your clearance; "
+            "the marking and disclosure duty above are not."
+        ),
+        "review.act50_badge_note": (
+            "Equivalent label, not the official EU AI icon set. The icon set is "
+            "optional and its use does not establish compliance by itself."
+        ),
         "review.audio_default": "no audio track",
         "review.audio_vocoder": "Vocoder anomaly",
         "review.audio_pitch": "Pitch-flatness flag",
@@ -230,6 +254,30 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "review.mp4_caption": "atomi MP4: {n} · faststart={f} · doppia compressione {h}",
         "review.ai_generated": "Generato da IA: {v} · generatore: {g} · SynthID: {s}",
+        "review.act50_title": "Trasparenza Art. 50 EU AI Act",
+        "review.act50_determination": "Determinazione: {d} (confidenza {c})",
+        "review.act50_marking": "Marcatura machine-readable: {m} via {s}",
+        "review.act50_disclosure": "Divulgazione richiesta: {r}",
+        "review.act50_label": "Testo etichetta: {l}",
+        "review.act50_subjects": "Soggetti rappresentati: {s}",
+        "review.act50_audience": "Rischio falsa apparenza (consapevole del pubblico): {r}",
+        "review.act50_exemption": "Esonero dichiarato: {e}",
+        "review.act50_deepfake": "deep fake",
+        "review.act50_not_deepfake": "non un deep fake",
+        "review.act50_indeterminate": "indeterminato",
+        "review.act50_yes": "sì",
+        "review.act50_no": "no",
+        "review.act50_undetermined": "non determinato (esonero o indeterminato)",
+        "review.act50_none": "nessuno",
+        "review.act50_no_standard": "nessuno standard rilevato",
+        "review.act50_restricted": (
+            "Dettaglio della determinazione (soggetti, confidenza, esonero) nascosto al tuo "
+            "livello di clearance; marcatura e obbligo di divulgazione sopra no."
+        ),
+        "review.act50_badge_note": (
+            "Etichetta equivalente, non l'icona ufficiale UE. Il set di icone è "
+            "opzionale e il suo uso non stabilisce la conformità di per sé."
+        ),
         "review.audio_default": "nessuna traccia audio",
         "review.audio_vocoder": "Anomalia vocoder",
         "review.audio_pitch": "Flag prosodia piatta",
@@ -363,6 +411,31 @@ _STRINGS: dict[str, dict[str, str]] = {
         "review.forensic_caption": ("anomalie {a} · {n} trame(s) · {d} · onnx={o} · temporel={t}"),
         "review.mp4_caption": "atomes MP4 : {n} · faststart={f} · double compression {h}",
         "review.ai_generated": "Généré par IA : {v} · générateur : {g} · SynthID : {s}",
+        "review.act50_title": "Transparence Art. 50 EU AI Act",
+        "review.act50_determination": "Détermination : {d} (confiance {c})",
+        "review.act50_marking": "Marquage machine-readable : {m} via {s}",
+        "review.act50_disclosure": "Divulgation requise : {r}",
+        "review.act50_label": "Texte de l'étiquette : {l}",
+        "review.act50_subjects": "Sujets représentés : {s}",
+        "review.act50_audience": "Risque de fausse apparence (conscient du public) : {r}",
+        "review.act50_exemption": "Exonération déclarée : {e}",
+        "review.act50_deepfake": "deep fake",
+        "review.act50_not_deepfake": "pas un deep fake",
+        "review.act50_indeterminate": "indéterminé",
+        "review.act50_yes": "oui",
+        "review.act50_no": "non",
+        "review.act50_undetermined": "non déterminé (exonération ou indéterminé)",
+        "review.act50_none": "aucun",
+        "review.act50_no_standard": "aucun standard détecté",
+        "review.act50_restricted": (
+            "Détail de la détermination (sujets, confiance, exonération) masqué selon votre "
+            "habilitation ; le marquage et l'obligation de divulgation ci-dessus ne le sont pas."
+        ),
+        "review.act50_badge_note": (
+            "Étiquette équivalente, pas l'ensemble d'icônes officiel UE. L'ensemble "
+            "d'icônes est optionnel et son utilisation n'établit pas la conformité "
+            "par elle-même."
+        ),
         "review.audio_default": "aucune piste audio",
         "review.audio_vocoder": "Anomalie vocodeur",
         "review.audio_pitch": "Drapeau prosodie plate",
@@ -496,6 +569,30 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "review.mp4_caption": "átomos MP4: {n} · faststart={f} · doble compresión {h}",
         "review.ai_generated": "Generado por IA: {v} · generador: {g} · SynthID: {s}",
+        "review.act50_title": "Transparencia Art. 50 EU AI Act",
+        "review.act50_determination": "Determinación: {d} (confianza {c})",
+        "review.act50_marking": "Marcado machine-readable: {m} vía {s}",
+        "review.act50_disclosure": "Divulgación requerida: {r}",
+        "review.act50_label": "Texto de etiqueta: {l}",
+        "review.act50_subjects": "Sujetos representados: {s}",
+        "review.act50_audience": "Riesgo de falsa apariencia (consciente del público): {r}",
+        "review.act50_exemption": "Exención declarada: {e}",
+        "review.act50_deepfake": "deep fake",
+        "review.act50_not_deepfake": "no es un deep fake",
+        "review.act50_indeterminate": "indeterminado",
+        "review.act50_yes": "sí",
+        "review.act50_no": "no",
+        "review.act50_undetermined": "no determinado (exención o indeterminado)",
+        "review.act50_none": "ninguno",
+        "review.act50_no_standard": "ningún estándar detectado",
+        "review.act50_restricted": (
+            "Detalle de la determinación (sujetos, confianza, exención) oculto según tu "
+            "habilitación; el marcado y la obligación de divulgación anteriores no lo están."
+        ),
+        "review.act50_badge_note": (
+            "Etiqueta equivalente, no el conjunto de iconos oficial UE. El conjunto "
+            "de iconos es opcional y su uso no establece el cumplimiento por sí mismo."
+        ),
         "review.audio_default": "sin pista de audio",
         "review.audio_vocoder": "Anomalía de vocoder",
         "review.audio_pitch": "Indicador de prosodia plana",

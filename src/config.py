@@ -102,6 +102,20 @@ class Settings:
     # --- active learning ---
     al_retrain_threshold: int = field(default_factory=lambda: _env_int("AL_RETRAIN_THRESHOLD", 50))
 
+    # --- EU AI Act Art. 50 operator posture ---
+    # These are *declared* by the operator, not inferred from the media: an
+    # Art. 50(4) carve-out is a legal act, so it must be a deliberate,
+    # auditable configuration change rather than a code default. Defaults are
+    # the conservative ones (deployer, no carve-out) so an unset deployment
+    # over-complies instead of quietly claiming an exemption.
+    ai_act_role: str = field(default_factory=lambda: _env("AI_ACT_ROLE", "deployer"))
+    ai_act_law_enforcement: bool = field(
+        default_factory=lambda: _env("AI_ACT_LAW_ENFORCEMENT", "0") == "1"
+    )
+    ai_act_standard_editing_only: bool = field(
+        default_factory=lambda: _env("AI_ACT_STANDARD_EDITING", "0") == "1"
+    )
+
     # --- output / serving ---
     report_out_dir: str = field(default_factory=lambda: _env("REPORT_OUT_DIR", "reports"))
     api_host: str = field(default_factory=lambda: _env("API_HOST", "127.0.0.1"))

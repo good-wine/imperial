@@ -11,6 +11,40 @@ from __future__ import annotations
 import json
 from typing import Any
 
+#: Art. 50 fields surfaced to the SOC. Enum tokens and booleans only — never
+#: free text. `exemption` is deliberately reduced to a flag: its value is
+#: operator-authored prose, and prose in a SIEM field is how one bad manifest
+#: becomes an injection vector in a downstream parser. Operators needing the
+#: wording read the case report.
+_AI_ACT_TOKENS = ("AI_GENERATED", "AI_MODIFIED", "HUMAN_DECLARED", "UNMARKED", "ABSENT")
+
+
+def _ai_act_fields(report: dict[str, Any]) -> dict[str, str]:
+    a = report.get("ai_act50") or {}
+    if not a:
+        # No assessment recorded: say so explicitly rather than omitting the
+        # field, so an analyst does not read a missing key as "no marking".
+        return {
+            "ai_act_marking": "NOT_ASSESSED",
+            "ai_act_deepfake": "NOT_ASSESSED",
+            "ai_act_disclosure_required": "NOT_ASSESSED",
+            "ai_act_exemption": "NOT_ASSESSED",
+        }
+    marking = str(a.get("machine_readable_marking", "ABSENT")).upper()
+    if marking not in _AI_ACT_TOKENS:
+        marking = "UNKNOWN"
+    deepfake = a.get("deepfake")
+    deep = "INDETERMINATE" if deepfake is None else ("TRUE" if deepfake else "FALSE")
+    disclosure = a.get("disclosure_required")
+    return {
+        "ai_act_marking": marking,
+        "ai_act_deepfake": deep,
+        "ai_act_disclosure_required": "UNKNOWN"
+        if disclosure is None
+        else str(bool(disclosure)).lower(),
+        "ai_act_exemption": str(bool(a.get("exemption"))).lower(),
+    }
+
 
 def _base(report: dict[str, Any]) -> dict[str, Any]:
     ctx = report.get("context") or {}
@@ -25,6 +59,7 @@ def _base(report: dict[str, Any]) -> dict[str, Any]:
         "top_match": (ctx.get("matches") or [{}])[0].get("event_id", "")
         if ctx.get("matches")
         else "",
+        **_ai_act_fields(report),
     }
 
 
@@ -66,7 +101,15 @@ def to_ecs(report: dict[str, Any]) -> dict[str, Any]:
         "threat": {
             "indicator": {"description": f"verdict={b['verdict']}", "confidence": b["confidence"]}
         },
-        "labels": {"tlp": b["tlp"], "top_match": b["top_match"]},
+        "labels": {
+            "tlp": b["tlp"],
+            "top_match": b["top_match"],
+            # Enum tokens, so they are safe as Elastic labels/kibana filters.
+            "ai_act_marking": b["ai_act_marking"],
+            "ai_act_deepfake": b["ai_act_deepfake"],
+            "ai_act_disclosure_required": b["ai_act_disclosure_required"],
+            "ai_act_exemption": b["ai_act_exemption"],
+        },
     }
 
 

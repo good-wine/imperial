@@ -23,6 +23,7 @@ import logging
 import re
 
 from src.config import SETTINGS
+from src.modules.ai_act50 import AiAct50Result, assess
 from src.modules.llm_backends import BaseLLMBackend, get_backend
 from src.schemas import (
     C2paResult,
@@ -316,6 +317,7 @@ def generate_report(
     forensic: ForensicResult,
     context: ContextResult,
     llm: BaseLLMBackend | None = None,
+    ai_act50: AiAct50Result | None = None,
 ) -> FinalReport:
     risk, factors = compute_risk(c2pa, forensic, context)
     verdict = score_to_verdict(risk)
@@ -383,6 +385,25 @@ def generate_report(
         findings.append("Cryptographic integrity failure takes precedence over visual appearance.")
 
     recommendations = _recommendations(verdict, c2pa, forensic, context)
+
+    # Art. 50 assessment is derived, never scored by the LLM: same evidence,
+    # separate legal question (transparency duty vs authenticity verdict). A
+    # caller holding extra multimodal evidence (the worker's aggregate path)
+    # passes its assessment in, so the same file is never assessed twice with
+    # different inputs.
+    ai_act50 = ai_act50 or assess(c2pa, forensic, context)
+    if ai_act50.disclosure_required:
+        recommendations.insert(
+            0,
+            f"AI Act Art. 50(4) disclosure required on first exposure: label "
+            f"'{ai_act50.label_text}' clear and distinguishable ({ai_act50.summary}).",
+        )
+    if ai_act50.machine_readable_marking == "ABSENT":
+        findings.append(
+            "Art. 50(2): no machine-readable marking detected — absence of a marker is not "
+            "evidence of a human original."
+        )
+
     return FinalReport(
         file_path=c2pa.file_path,
         risk_score=risk,
@@ -395,6 +416,7 @@ def generate_report(
         c2pa=c2pa.to_dict(),
         forensic=forensic.to_dict(),
         context=context.to_dict(),
+        ai_act50=ai_act50.to_dict(),
         hypotheses=[h.to_dict() for h in hyps],
         analytic_confidence=conf,
         tlp=SETTINGS.tlp,

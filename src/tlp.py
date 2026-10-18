@@ -29,6 +29,7 @@ VISIBLE_FIELDS: dict[str, set[str]] = {
         "citations",
         "llm_backend",
         "calibration_note",
+        "ai_act50",
     },
     "TLP:GREEN": {
         "file_path",
@@ -45,6 +46,7 @@ VISIBLE_FIELDS: dict[str, set[str]] = {
         "citations",
         "llm_backend",
         "calibration_note",
+        "ai_act50",
     },
     "TLP:AMBER": {
         "file_path",

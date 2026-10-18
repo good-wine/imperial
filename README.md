@@ -92,6 +92,18 @@ Quality bars (enforced): `ruff check` + `ruff format --check` clean,
 - **Rust-ready**: `schemas.py` v2 dicts are the frozen wire format;
   `rust/provenance-jumbf` already parses JUMBF with property tests.
 
+## EU AI Act Art. 50 transparency
+
+`src/modules/ai_act50.py` answers a **different question from authenticity**:
+is the media machine-readably marked, and must a human see a label? `assess()`
+runs on every report and reaches four surfaces: `report.ai_act50` (schema v2
+JSON), the markdown `## EU AI Act Art. 50 transparency` block (carrying the
+required label text), `x_ai_act50` on the STIX `opinion` object, and
+`GET /api/v1/cases/{uuid}/transparency` (marking state, disclosure duty,
+accessible SVG badge) for publication pipelines. Carve-outs are declared via
+`AI_ACT_ROLE`/`AI_ACT_LAW_ENFORCEMENT`/`AI_ACT_STANDARD_EDITING`, never applied
+silently; every payload carries `legal_advice: false`.
+
 ## Offline / Docker
 
 ```bash

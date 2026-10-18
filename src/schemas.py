@@ -251,6 +251,7 @@ class FinalReport:
     # Enterprise multimodal leg (audio/lipsync/rppg/mp4/geoint dicts).
     multimodal: dict[str, Any] = field(default_factory=dict)
     # --- SOTA tradecraft / compliance ---
+    ai_act50: dict[str, Any] = field(default_factory=dict)
     schema_version: str = REPORT_SCHEMA_VERSION
     hypotheses: list[dict[str, Any]] = field(default_factory=list)
     analytic_confidence: str = "Moderate"  # High | Moderate | Low (ICD-206)
@@ -267,6 +268,52 @@ class FinalReport:
             self.verdict.value if isinstance(self.verdict, Verdict) else str(self.verdict)
         )
         return d
+
+    def _ai_act50_markdown(self) -> list[str]:
+        """Art. 50 block for the human-readable report.
+
+        Emits the disclosure label when one is required, so the exported
+        markdown is itself a compliant Art. 50(5) disclosure carrier for
+        downstream republication. Nothing is emitted when no assessment ran.
+        """
+        a = self.ai_act50 or {}
+        if not a:
+            return []
+        deepfake = {True: "deep fake", False: "not a deep fake", None: "indeterminate"}[
+            a.get("deepfake") if a.get("deepfake") in (True, False, None) else None
+        ]
+        marking = a.get("machine_readable_marking", "ABSENT")
+        standard = a.get("marking_standard") or "no standard detected"
+        label = f" — label `{a['label_text']}`" if a.get("label_text") else ""
+        subjects = ", ".join(a.get("depicted_subject") or []) or "none"
+        risk_note = a.get("false_appearance_risk", "unknown")
+        lines = [
+            "",
+            "## EU AI Act Art. 50 transparency",
+            "",
+            f"- **Determination:** {deepfake} (confidence {a.get('deepfake_confidence', 'n/a')})",
+            f"- **Machine-readable marking:** {marking} via {standard}",
+            f"- **Disclosure required:** {a.get('disclosure_required')}{label}",
+            f"- **Depicted subject classes:** {subjects}",
+            f"- **False-appearance risk (audience-aware):** {risk_note}",
+        ]
+        for key, title in (
+            ("marking_evidence", "Marking evidence"),
+            ("deepfake_basis", "Determination basis"),
+            ("supporting_evidence", "Supporting evidence (non-specific)"),
+            ("disclosure_obligations", "Disclosure obligations"),
+            ("accessibility", "Accessibility"),
+            ("references", "References"),
+        ):
+            items = a.get(key) or []
+            if items:
+                lines += [f"- **{title}:**"]
+                lines += [f"  - {i}" for i in items]
+        if a.get("exemption"):
+            lines.append(f"- **Carve-out declared:** {a['exemption']}")
+        if a.get("legal_advice") is False:
+            lines.append(f"- _{a.get('legal_note', '')}_")
+        return lines
 
     def to_markdown(self) -> str:
         verdict = self.verdict.value if isinstance(self.verdict, Verdict) else self.verdict
@@ -306,6 +353,7 @@ class FinalReport:
         lines += [f"- {x}" for x in self.findings] or ["- No findings."]
         lines += ["", "## Recommendations", ""]
         lines += [f"- {x}" for x in self.recommendations] or ["- No recommendations."]
+        lines += self._ai_act50_markdown()
         if self.citations:
             lines += ["", "## Citations", ""]
             lines += [f"- {c}" for c in self.citations]

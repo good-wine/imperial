@@ -129,6 +129,7 @@ def build_bundle(
             "x_risk_score": risk,
             "x_verdict": verdict,
             "x_analytic_confidence": str(report.get("analytic_confidence", "")),
+            "x_ai_act50": report.get("ai_act50", {}),
         }
     )
     report_id = f"report--{_uid('report', sha)}"

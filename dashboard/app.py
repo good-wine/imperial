@@ -406,6 +406,80 @@ with tab_case:
                             st.write(f"- {f}")
                         for x in res.get("recommendations", []):
                             st.write(f"+ {x}")
+
+                    # EU AI Act Art. 50 transparency block. Read the top-level
+                    # payload the case endpoint serves (clearance-scoped), not
+                    # `result`: at AMBER/RED `result.ai_act50` is absent, and a
+                    # truthy guard on it fabricated a reassuring "no marking".
+                    ai_act = case.get("ai_act50") or {}
+                    if ai_act.get("available"):
+                        with st.expander(t(lang, "review.act50_title")):
+                            a = ai_act
+                            st.write(
+                                t(
+                                    lang,
+                                    "review.act50_marking",
+                                    m=a.get("machine_readable_marking", "ABSENT"),
+                                    s=a.get("marking_standard")
+                                    or t(lang, "review.act50_no_standard"),
+                                )
+                            )
+                            if a.get("disclosure_required") is True:
+                                disclosure_key = "review.act50_yes"
+                            elif a.get("disclosure_required") is False:
+                                disclosure_key = "review.act50_no"
+                            else:
+                                disclosure_key = "review.act50_undetermined"
+                            st.write(
+                                t(
+                                    lang,
+                                    "review.act50_disclosure",
+                                    r=t(lang, disclosure_key),
+                                )
+                            )
+                            if a.get("label_text"):
+                                st.write(t(lang, "review.act50_label", l=a["label_text"]))
+                            if a.get("restricted"):
+                                # Withheld fields must read as withheld, not as
+                                # "assessed: none" (the fabricated-default bug).
+                                st.caption(t(lang, "review.act50_restricted"))
+                            else:
+                                if a.get("deepfake") is None:
+                                    det_label = t(lang, "review.act50_indeterminate")
+                                elif a.get("deepfake"):
+                                    det_label = t(lang, "review.act50_deepfake")
+                                else:
+                                    det_label = t(lang, "review.act50_not_deepfake")
+                                st.write(
+                                    t(
+                                        lang,
+                                        "review.act50_determination",
+                                        d=det_label,
+                                        c=a.get("deepfake_confidence", "Indeterminate"),
+                                    )
+                                )
+                                st.write(
+                                    t(
+                                        lang,
+                                        "review.act50_subjects",
+                                        s=", ".join(a.get("depicted_subject", []))
+                                        or t(lang, "review.act50_none"),
+                                    )
+                                )
+                                st.write(
+                                    t(
+                                        lang,
+                                        "review.act50_audience",
+                                        r=a.get("false_appearance_risk", "unknown"),
+                                    )
+                                )
+                                if a.get("exemption"):
+                                    st.info(t(lang, "review.act50_exemption", e=a["exemption"]))
+                            badge = a.get("disclosure_badge_svg")
+                            if badge:
+                                st.markdown(badge, unsafe_allow_html=True)
+                                st.caption(t(lang, "review.act50_badge_note"))
+
                 with fo:
                     fr = res.get("forensic") or {}
                     st.caption(

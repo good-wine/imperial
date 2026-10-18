@@ -4,6 +4,60 @@ All notable changes to the Provenance Engine follow
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) versioning
 (`MAJOR.MINOR.PATCH` on `pyproject.toml`).
 
+## [4.5.0] - 2026-10-04
+
+### Added
+- EU AI Act Art. 50 transparency assessment (`src/modules/ai_act50.py`):
+  machine-readable marking detection from C2PA `digitalSourceType`, invisible
+  watermarks and soft binding; Art. 3(60) deep-fake determination that is
+  audience-aware and intent-independent; Art. 50(4) disclosure duty with an
+  accessible SVG badge; declared (never silently applied) carve-outs; and
+  `legal_advice: false` on every payload.
+- Assessment now runs on every report (`generate_report()` and
+  `aggregate_report()`) and reaches all four output paths: `report.ai_act50`
+  in the schema v2 JSON, an `## EU AI Act Art. 50 transparency` block in the
+  markdown (carrying the required label text), `x_ai_act50` on the STIX
+  `opinion` object, and `GET /api/v1/cases/{uuid}/transparency` for
+  publication pipelines.
+- `tests/test_ai_act50.py`: marking-state separation, decisive-vs-supporting
+  evidence split, carve-out declaration, badge accessibility, output parity,
+  and TLP interaction.
+
+### Fixed
+- Art. 50 evidence extraction read three fields that do not exist on
+  `ForensicResult` (`faces`, `instability`, `splicing_detected`). Subject
+  detection therefore never found a PERSON, audience risk never rose to
+  `high`, and the signal list was always empty — every image was assessed
+  "not a deep fake" regardless of anomaly score. Now reads per-frame
+  `face_count`, `aggregate_anomaly`, `temporal_consistency` and
+  `face_anomaly`.
+- A generic forensic anomaly no longer tips the Art. 3(60) determination to
+  "deep fake". Recompression and rescaling raise the same score, so such
+  evidence moves to the new `supporting_evidence` field and yields
+  `Indeterminate`, keeping decisive and weak evidence separately auditable.
+- Watermark marking read keys no producer emits (`detected`, `soft_binding`)
+  and treated the `synthid` *status string* as a boolean, so every analysed
+  file without a C2PA AI declaration was reported `AI_GENERATED` with
+  `deepfake=True`. Now reads the real `WatermarkResult` contract
+  (`ai_generated is True`, `synthid == "DETECTED"`).
+- The audio media leg read `manipulated`/`mismatch`/`verdict` keys absent from
+  `AudioResult`, so it was unreachable; it now reads `vocoder_anomaly` at the
+  risk-engine threshold, while flat prosody (`pitch_instability`) is
+  supporting-only (dubbing, singing and compression flatten prosody too).
+- The CLI and worker paths assessed the same media twice with different inputs
+  (the worker's assessment carries the multimodal evidence); the assessment is
+  now computed once and shared, removing a duplicated Art. 50(4)
+  recommendation.
+- The transparency payload is field-scoped by clearance: the compliance duty
+  (marking state, disclosure requirement, label/badge) is served at every
+  level, while `deepfake`, `depicted_subject` and the operator
+  posture/`exemption` wording are withheld above GREEN and named in a
+  `withheld_fields` list instead of being served beside a RED-redacted
+  `result`. The STIX bundle and the SIEM export still carry the
+  determination (case-TLP-gated export paths).
+- The disclosure badge escapes interpolated text, uses per-label element ids
+  and carries a border (visible on a dark page).
+
 ## [4.4.0] - 2026-10-03
 
 ### Added
