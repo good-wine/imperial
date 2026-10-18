@@ -29,12 +29,27 @@ STIX bundle and the SIEM export DO carry the determination: they are
 case-TLP-gated export paths, not the per-requester API payload — stated here so
 that no one reads the API scoping as a property of every output surface.
 
-Caveat, stated plainly: TLP clearance is **requester-declared** (`X-TLP`
-header or `clearance` param) with no identity binding on the published API
-port. TLP is a handling caveat, not an access control; binding clearance to an
-identity (gateway-injected header, mTLS/oauth2-proxy, or `ports` bound to
-loopback) is a deployment concern recorded as a known gap, not something these
-endpoints enforce.
+Caveat and mitigation: by default TLP clearance is **requester-declared**
+(`X-TLP` header or `clearance` param) — TLP is a handling caveat, not an access
+control, and the API and dashboard ports are therefore bound to loopback by
+default in `docker-compose.yml` (reached through Caddy, or the oauth2-proxy in
+front of the dashboard). For classified networks, `OIDC_BIND_CLEARANCE=1` binds
+the effective clearance to the bearer token's claim (`OIDC_TLP_CLAIM`, default
+`tlp_clearance`): the declared header is **capped** by the token — never
+escalated — and fails closed to `TLP:CLEAR` on a missing/invalid/unverifiable
+token. Binding also **requires** `OIDC_AUDIENCE`: without an audience check a
+token minted for another client at the same issuer would be accepted, so an
+empty audience fails closed. Enabling OIDC now also makes a valid bearer
+*mandatory*: the self-declared `owner`/`X-Analyst`/form field is no longer
+accepted as identity (it would otherwise be written into the case owner and the
+audit trail unverified), and `OIDC_ALLOW_ANONYMOUS=1` is the explicit opt-out
+for a trusted lab. Note what the shipped compose does *not* do: Caddy is a plain
+TLS reverse proxy (no bearer validation) and the `oauth2-proxy` service is behind
+the `sso` profile with no Caddy route to it, so under the default `full` profile
+the console is reachable without authentication either. Identity-binding the
+ingress in front of the API and console (mTLS gateway or an authenticating
+proxy) is therefore the deployment's responsibility; the endpoints enforce the
+cap, they do not authenticate on their own.
 
 ## Chain of custody (ISO/IEC 27037)
 SHA-256 at ingestion, UTC timestamps, handler/owner, transfer log on

@@ -29,6 +29,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dashboard.i18n import LANGS, current_lang, t
 
 API_BASE = os.getenv("API_BASE", "http://127.0.0.1:8088")
+#: Optional bearer for deployments with OIDC clearance binding enabled
+#: (`OIDC_BIND_CLEARANCE=1`): without it the console is capped at TLP:CLEAR.
+API_BEARER = os.getenv("DASHBOARD_API_BEARER", "")
 
 try:
     import requests
@@ -182,9 +185,22 @@ with st.sidebar:
 _tlp_banner(clearance, t(lang, "sidebar.session_banner"))
 
 
+def _headers() -> dict:
+    """Request headers: declared clearance, plus the bearer when configured.
+
+    The server caps the declared clearance by the token's claim when
+    `OIDC_BIND_CLEARANCE=1`, so sending the bearer is what lets a cleared
+    analyst read above TLP:CLEAR in that mode.
+    """
+    h = {"X-TLP": clearance}
+    if API_BEARER:
+        h["Authorization"] = f"Bearer {API_BEARER}"
+    return h
+
+
 def _get(path: str, **kw):
     try:
-        return requests.get(api_base + path, headers={"X-TLP": clearance}, timeout=30, **kw)
+        return requests.get(api_base + path, headers=_headers(), timeout=30, **kw)
     except Exception as exc:
         st.error(t(lang, "api.unreachable", err=exc))
         return None
@@ -294,7 +310,7 @@ with tab_up:
                 api_base + "/api/v1/verify",
                 files=files,
                 data=data,
-                headers={"X-TLP": clearance},
+                headers=_headers(),
                 timeout=120,
             )
             if r.status_code == 200:

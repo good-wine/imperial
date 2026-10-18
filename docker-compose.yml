@@ -76,7 +76,11 @@ services:
       - ./data:/app/data
       - ./reports:/app/reports
       - ./models:/app/models:ro
-    ports: ["8000:8000"]
+    # Bind to loopback by default: the API enforces TLP as a *handling caveat*
+    # (clearance is requester-declared unless OIDC_BIND_CLEARANCE=1), so it must
+    # not be published on all interfaces. Reach it via Caddy (TLS) or the
+    # dashboard. To expose it directly, override to `0.0.0.0:8000:8000`.
+    ports: ["127.0.0.1:8000:8000"]
     depends_on:
       redis: {condition: service_started}
       postgres: {condition: service_healthy}
@@ -152,7 +156,13 @@ services:
     environment:
       API_BASE: http://api:8000
       DASHBOARD_LANG: ${DASHBOARD_LANG:-en}
-    ports: ["8501:8501"]
+      # Optional: bearer so the console can read above TLP:CLEAR when the API
+      # runs with OIDC_BIND_CLEARANCE=1 (otherwise the clearance selector caps
+      # at TLP:CLEAR server-side).
+      DASHBOARD_API_BEARER: ${DASHBOARD_API_BEARER:-}
+    # Loopback by default: Streamlit has no login of its own (put oauth2-proxy
+    # in front, see the `oauth2-proxy` service). Override to expose directly.
+    ports: ["127.0.0.1:8501:8501"]
     depends_on:
       api: {condition: service_healthy}
     profiles: ["full", "ui"]

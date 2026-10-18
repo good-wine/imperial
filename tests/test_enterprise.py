@@ -65,6 +65,15 @@ def test_tlp_allows_and_redact():
     assert redact(rep, "TLP:CLEAR")["tlp"] == "TLP:AMBER"  # classification preserved
 
 
+def test_tlp_clamp_clearance_never_escalates():
+    from src.tlp import clamp_clearance
+
+    assert clamp_clearance("TLP:RED", "TLP:AMBER") == "TLP:AMBER"  # capped down
+    assert clamp_clearance("TLP:CLEAR", "TLP:RED") == "TLP:CLEAR"  # never inflated
+    assert clamp_clearance("tLp:Green", "TLP:GREEN") == "TLP:GREEN"  # normalized
+    assert clamp_clearance("bogus", "TLP:AMBER") == "TLP:CLEAR"  # unknown -> lowest
+
+
 # ---------------------------------------------------------------- Ed25519 (OpenSSL cross-check)
 
 

@@ -176,6 +176,10 @@ class _ApiCtx:
     """Shared mutable API state: rate limit + operational counters."""
 
     rate_limit: int = 30
+    #: Higher budget for read paths: the analyst console polls cases/health and
+    #: each compliance read writes an audit row, so reads need a bound too —
+    #: just not the ingestion budget.
+    read_rate_limit: int = 240
     metrics: dict[str, int] = field(
         default_factory=lambda: {
             "verify_total": 0,
@@ -186,10 +190,19 @@ class _ApiCtx:
     )
 
 
-def _clearance(x_tlp: str | None, param: str = "TLP:CLEAR") -> str:
+def _clearance(
+    x_tlp: str | None, param: str = "TLP:CLEAR", authorization: str | None = None
+) -> str:
+    """Resolve the effective clearance, capped by identity when binding is on.
+
+    With `OIDC_BIND_CLEARANCE=1` (and OIDC configured) the self-declared header
+    cannot exceed the bearer token's clearance claim; otherwise the declaration
+    is taken as-is (field-laptop mode).
+    """
+    from src.oidc import bound_clearance
     from src.tlp import normalize
 
-    return normalize(x_tlp or param)
+    return bound_clearance(authorization, normalize(x_tlp or param))
 
 
 def _write_chunks(dest: Path, chunks: list[bytes]) -> None:
@@ -243,11 +256,19 @@ def _ai_act50_payload(report: dict, clearance: str = "TLP:CLEAR") -> dict:
     and never mistakes a missing assessment for "no marking found".
 
     Field-scoped by clearance like the rest of the record: the *compliance
-    fact* (marking state, disclosure duty, label/badge) is served at every
-    level, but the case-intelligence fields (`deepfake`, `depicted_subject`),
-    the operator posture and the carve-out prose are only served where the
-    report's own `result` would have carried them (CLEAR/GREEN). Serving them
-    beside a RED-redacted `result` leaked them past the TLP boundary.
+    duty* (marking state, `disclosure_required`, label/badge) is served at
+    every level — a publication pipeline needs it — while the case-intelligence
+    detail (`depicted_subject`, `false_appearance_risk`), the raw graded
+    determination (`deepfake`, `deepfake_confidence`), the operator posture and
+    the carve-out prose are only served where the report's own `result` would
+    have carried them (CLEAR/GREEN). Serving them beside a RED-redacted `result`
+    leaked them past the TLP boundary.
+
+    Note that `disclosure_required` is not neutral: a `true` implies the
+    assessment found a disclosure duty, so the *fact of a determination* is
+    visible at every clearance by design. What is withheld above GREEN is the
+    subject/operator intelligence and the graded detail, and `redaction_note`
+    says so explicitly so no consumer misreads a withheld field as "absent".
     """
     a = report.get("ai_act50") or {}
     if not a:
@@ -290,11 +311,12 @@ def _ai_act50_payload(report: dict, clearance: str = "TLP:CLEAR") -> dict:
             "Art. 50(5) requires is a clear, distinguishable, accessible "
             "disclosure at first exposure."
         )
-    # Above GREEN, serve the compliance duty but withhold case intelligence and
-    # operator posture: `depicted_subject`/`deepfake` are facts about the media
-    # content, `operator_posture`/`exemption` about the deployment. The withheld
-    # keys are named in the payload so a consumer can tell "withheld" from
-    # "assessed as absent" instead of reading fabricated defaults.
+    # Above GREEN, serve the compliance duty but withhold case intelligence,
+    # the graded determination and operator posture: `depicted_subject`/
+    # `deepfake` are facts about the media content, `operator_posture`/
+    # `exemption` about the deployment. The withheld keys are named in the
+    # payload so a consumer can tell "withheld" from "assessed as absent"
+    # instead of reading fabricated defaults.
     from src.tlp import normalize
 
     if normalize(clearance) not in ("TLP:CLEAR", "TLP:GREEN"):
@@ -310,6 +332,14 @@ def _ai_act50_payload(report: dict, clearance: str = "TLP:CLEAR") -> dict:
             out.pop(hidden, None)
         out["restricted"] = True
         out["withheld_fields"] = list(withheld)
+        out["redaction_note"] = (
+            "Only the Art. 50 compliance duty is served at this clearance "
+            "(marking state, disclosure_required, label/badge); a present "
+            "disclosure_required means a disclosure duty applies. The depicted "
+            "subject, audience risk, graded deep-fake determination, operator "
+            "posture and carve-out prose are withheld — read the named "
+            "withheld_fields as withheld, not as absent."
+        )
     return out
 
 
@@ -348,19 +378,37 @@ def _require_clearance(clearance: str, record_tlp: str, action: str) -> None:
 
 
 def _register_middleware(api: FastAPI, ctx: _ApiCtx) -> None:
-    """Shared-budget rate limiting on ingestion-grade endpoints (DoS shield)."""
+    """Rate limiting: ingestion budget + a separate read budget.
+
+    Writes get the small ingestion budget (DoS shield). Reads get a larger
+    budget: the analyst console polls the case endpoints, and each compliance
+    read (e.g. `/transparency`) writes an audit row, so an unbounded read path
+    is an unbounded audit-write path.
+    """
     from src.ratelimit import RateLimiter
 
-    limiter = RateLimiter(ctx.rate_limit, os.getenv("CELERY_BROKER_URL", ""))
+    broker = os.getenv("CELERY_BROKER_URL", "")
+    write_limiter = RateLimiter(ctx.rate_limit, broker)
+    read_limiter = RateLimiter(ctx.read_rate_limit, broker)
 
     @api.middleware("http")
     async def _rate_limit(request, call_next):
-        guarded = request.url.path.startswith(
-            ("/api/v1/verify", "/api/v1/osint", "/api/v1/feedback")
-        )
-        if guarded:
+        path = request.url.path
+        if path.startswith(
+            ("/api/v1/verify", "/api/v1/osint", "/api/v1/feedback", "/api/v1/admin")
+        ):
+            bucket, prefix = write_limiter, "rw"
+        elif path.startswith(
+            ("/api/v1/cases", "/api/v1/export", "/api/v1/federated", "/api/v1/search")
+        ):
+            bucket, prefix = read_limiter, "ro"
+        else:
+            bucket, prefix = None, ""
+        if bucket is not None:
             ip = request.client.host if request.client else "?"
-            if not limiter.allowed(f"rl:{ip}"):
+            # Namespaced key: the read and write buckets must not share a counter,
+            # or a burst of reads would erode the ingestion (DoS) budget.
+            if not bucket.allowed(f"{prefix}:rl:{ip}"):
                 return JSONResponse({"detail": "rate limit exceeded"}, status_code=429)
         return await call_next(request)
 
@@ -468,6 +516,7 @@ def _register_cases(api: FastAPI, ctx: _ApiCtx) -> None:
         tlp: str = "",
         clearance: str = "TLP:CLEAR",
         x_tlp: str | None = Header(None, alias="X-TLP"),
+        authorization: str | None = Header(None, alias="Authorization"),
     ) -> JSONResponse:
         """Paginated case listing with status/TLP filters.
 
@@ -476,7 +525,7 @@ def _register_cases(api: FastAPI, ctx: _ApiCtx) -> None:
         """
         from src.database import get_repository
 
-        clr = _clearance(x_tlp, clearance)
+        clr = _clearance(x_tlp, clearance, authorization)
         repo = get_repository()
         rows = [
             r
@@ -490,6 +539,7 @@ def _register_cases(api: FastAPI, ctx: _ApiCtx) -> None:
         case_uuid: str,
         clearance: str = "TLP:CLEAR",
         x_tlp: str | None = Header(None, alias="X-TLP"),
+        authorization: str | None = Header(None, alias="Authorization"),
     ) -> JSONResponse:
         """Art. 50(2) marking state + Art. 50(4) disclosure duty, machine-readable.
 
@@ -499,7 +549,7 @@ def _register_cases(api: FastAPI, ctx: _ApiCtx) -> None:
         """
         from src.database import get_repository
 
-        clr = _clearance(x_tlp, clearance)
+        clr = _clearance(x_tlp, clearance, authorization)
         repo = get_repository()
         case = _get_case_or_404(repo, case_uuid)
         _require_clearance(clr, case.get("tlp", "TLP:CLEAR"), "transparency fetch")
@@ -524,10 +574,11 @@ def _register_cases(api: FastAPI, ctx: _ApiCtx) -> None:
         case_uuid: str,
         clearance: str = "TLP:CLEAR",
         x_tlp: str | None = Header(None, alias="X-TLP"),
+        authorization: str | None = Header(None, alias="Authorization"),
     ) -> JSONResponse:
         from src.database import get_repository
 
-        clr = _clearance(x_tlp, clearance)
+        clr = _clearance(x_tlp, clearance, authorization)
         repo = get_repository()
         case = _get_case_or_404(repo, case_uuid)
         _require_clearance(clr, case.get("tlp", "TLP:CLEAR"), "case fetch")
@@ -589,6 +640,7 @@ def _register_similar(api: FastAPI, ctx: _ApiCtx) -> None:
         limit: int = 10,
         clearance: str = "TLP:CLEAR",
         x_tlp: str | None = Header(None, alias="X-TLP"),
+        authorization: str | None = Header(None, alias="Authorization"),
     ) -> JSONResponse:
         """Cross-case correlation across the Qdrant vector store.
 
@@ -599,7 +651,7 @@ def _register_similar(api: FastAPI, ctx: _ApiCtx) -> None:
         """
         import os as _os
 
-        clr = _clearance(x_tlp, clearance)
+        clr = _clearance(x_tlp, clearance, authorization)
         _require_clearance(clr, "TLP:GREEN", "similarity search")
         limit = max(1, min(limit, 50))
         store = _get_store(
@@ -655,10 +707,18 @@ def _register_similar(api: FastAPI, ctx: _ApiCtx) -> None:
 
 def _register_osint(api: FastAPI, ctx: _ApiCtx) -> None:
     @api.post("/api/v1/osint/poll")
-    async def osint_poll(owner: str = "osint") -> JSONResponse:
+    async def osint_poll(
+        owner: str = "osint", authorization: str | None = Header(None, alias="Authorization")
+    ) -> JSONResponse:
         """Trigger one OSINT ingestion cycle (RSS/Telegram -> cases)."""
         from ingestion.pipeline import run_once
         from src.database import get_repository
+        from src.oidc import analyst_id
+
+        try:
+            owner = analyst_id(authorization, owner or "osint")
+        except PermissionError as exc:
+            raise HTTPException(401, str(exc)) from exc
 
         created = await run_once(owner)
         get_repository().audit(actor=owner, action="osint.poll", detail={"created": len(created)})
@@ -669,6 +729,7 @@ def _register_osint(api: FastAPI, ctx: _ApiCtx) -> None:
     def admin_purge(
         clearance: str = "TLP:CLEAR",
         x_tlp: str | None = Header(None, alias="X-TLP"),
+        authorization: str | None = Header(None, alias="Authorization"),
     ) -> JSONResponse:
         """Manually trigger the TLP retention sweep (same code path as the
         daily beat task). RED clearance required: deletion is irreversible,
@@ -676,7 +737,7 @@ def _register_osint(api: FastAPI, ctx: _ApiCtx) -> None:
         the audit trail itself is never purged."""
         from src.database import get_repository
 
-        clr = _clearance(x_tlp, clearance)
+        clr = _clearance(x_tlp, clearance, authorization)
         _require_clearance(clr, "TLP:RED", "retention purge")
         try:
             from worker import purge_expired as _purge_task
@@ -722,6 +783,7 @@ def _register_exports(api: FastAPI, ctx: _ApiCtx) -> None:
         format: str = "cef",
         clearance: str = "TLP:CLEAR",
         x_tlp: str | None = Header(None, alias="X-TLP"),
+        authorization: str | None = Header(None, alias="Authorization"),
     ) -> Response:
         """SOC formats: ?format=cef (ArcSight) | leef (QRadar) | ecs (Elastic).
         Fixed schema only — no LLM prose crosses into SIEM (injection-safe)."""
@@ -729,7 +791,7 @@ def _register_exports(api: FastAPI, ctx: _ApiCtx) -> None:
 
         from src.database import get_repository
 
-        clr = _clearance(x_tlp, clearance)
+        clr = _clearance(x_tlp, clearance, authorization)
         repo = get_repository()
         _, res = _gated_result(case_uuid, clr)
         body, mime = _render_siem_report(res["report_json"], format)
@@ -749,12 +811,13 @@ def _register_exports(api: FastAPI, ctx: _ApiCtx) -> None:
         case_uuid: str,
         clearance: str = "TLP:CLEAR",
         x_tlp: str | None = Header(None, alias="X-TLP"),
+        authorization: str | None = Header(None, alias="Authorization"),
     ) -> JSONResponse:
         import json as _json
 
         from src.database import get_repository
 
-        clr = _clearance(x_tlp, clearance)
+        clr = _clearance(x_tlp, clearance, authorization)
         repo = get_repository()
         _, res = _gated_result(case_uuid, clr)
         if not res.get("stix_json"):
@@ -811,12 +874,14 @@ def _register_feedback(api: FastAPI, ctx: _ApiCtx) -> None:
 def _register_federated(api: FastAPI, ctx: _ApiCtx) -> None:
     @api.get("/api/v1/federated/indicators")
     def federated(
-        clearance: str = "TLP:CLEAR", x_tlp: str | None = Header(None, alias="X-TLP")
+        clearance: str = "TLP:CLEAR",
+        x_tlp: str | None = Header(None, alias="X-TLP"),
+        authorization: str | None = Header(None, alias="Authorization"),
     ) -> JSONResponse:
         """Anonymized IoB/IoC sharing: only TLP:CLEAR/GREEN records, PII stripped."""
         from src.database import get_repository
 
-        clr = _clearance(x_tlp, clearance)
+        clr = _clearance(x_tlp, clearance, authorization)
         _require_clearance(clr, "TLP:GREEN", "federated sharing")
         indicators = get_repository().shareable_indicators(limit=200)
         return JSONResponse({"indicators": indicators, "count": len(indicators), "clearance": clr})
@@ -827,7 +892,10 @@ def build_api():
     if not _FASTAPI:
         raise RuntimeError("fastapi not installed (pip install fastapi uvicorn)")
 
-    ctx = _ApiCtx(rate_limit=int(os.getenv("API_RATE_LIMIT_PER_MIN", "30")))
+    ctx = _ApiCtx(
+        rate_limit=int(os.getenv("API_RATE_LIMIT_PER_MIN", "30")),
+        read_rate_limit=int(os.getenv("API_RATE_LIMIT_READ_PER_MIN", "240")),
+    )
     api = FastAPI(title="Media Provenance & Verification Engine", version="3.0")
     _register_middleware(api, ctx)
     _register_ops(api, ctx)

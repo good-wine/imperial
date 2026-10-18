@@ -108,6 +108,19 @@ def test_oidc_disabled_passthrough(monkeypatch):
     assert oidc.analyst_id(None, "field-op") == "field-op"
 
 
+def test_oidc_enabled_requires_bearer(monkeypatch):
+    """With OIDC on, an unauthenticated request must not be attributed to a
+    self-declared owner; the anonymous fallback needs an explicit opt-in."""
+    from src import oidc
+
+    monkeypatch.setenv("OIDC_ISSUER", "https://idp/x")
+    monkeypatch.delenv("OIDC_ALLOW_ANONYMOUS", raising=False)
+    with pytest.raises(PermissionError):
+        oidc.analyst_id(None, "spoofed-owner")
+    monkeypatch.setenv("OIDC_ALLOW_ANONYMOUS", "1")
+    assert oidc.analyst_id(None, "field-op") == "field-op"
+
+
 def test_oidc_roundtrip_and_rejections(monkeypatch):
     from src import oidc
 
@@ -138,6 +151,68 @@ def test_oidc_roundtrip_and_rejections(monkeypatch):
         oidc.verify_bearer("not.a.jwt", "https://idp/x", "api")
     with pytest.raises(PermissionError):
         oidc.analyst_id("Bearer garbage", "fallback")
+
+
+def test_clearance_binding_disabled_is_passthrough(monkeypatch):
+    from src import oidc
+
+    monkeypatch.setenv("OIDC_ISSUER", "https://idp/x")
+    monkeypatch.setenv("OIDC_BIND_CLEARANCE", "0")
+    assert oidc.bound_clearance(None, "TLP:RED") == "TLP:RED"
+
+
+def test_clearance_binding_caps_declared_clearance(monkeypatch):
+    """With binding on, identity caps the self-declared clearance and never
+    escalates; a missing/invalid token fails closed to TLP:CLEAR."""
+    from src import oidc
+
+    priv, jwks = _rsa_keypair()
+    monkeypatch.setattr(oidc, "_jwks", lambda issuer: jwks)
+    monkeypatch.setenv("OIDC_ISSUER", "https://idp/x")
+    monkeypatch.setenv("OIDC_AUDIENCE", "api")
+    monkeypatch.setenv("OIDC_BIND_CLEARANCE", "1")
+    monkeypatch.delenv("OIDC_TLP_CLAIM", raising=False)
+
+    amber = _jwt(priv, payload={"tlp_clearance": "TLP:AMBER"})
+    # Declared below the grant: kept as-is (never inflated).
+    assert oidc.bound_clearance(f"Bearer {amber}", "TLP:CLEAR") == "TLP:CLEAR"
+    # Declared above the grant: capped down to the token's clearance.
+    assert oidc.bound_clearance(f"Bearer {amber}", "TLP:RED") == "TLP:AMBER"
+
+    # No token / invalid token / no claim -> fail closed.
+    assert oidc.bound_clearance(None, "TLP:RED") == "TLP:CLEAR"
+    assert oidc.bound_clearance("Bearer garbage", "TLP:RED") == "TLP:CLEAR"
+    assert oidc.bound_clearance(f"Bearer {_jwt(priv)}", "TLP:RED") == "TLP:CLEAR"
+
+    custom = _jwt(priv, payload={"realm_tlp": "TLP:GREEN"})
+    monkeypatch.setenv("OIDC_TLP_CLAIM", "realm_tlp")
+    # The configured claim name is what caps the declared clearance.
+    assert oidc.bound_clearance(f"Bearer {custom}", "TLP:RED") == "TLP:GREEN"
+
+
+def test_clearance_binding_requires_audience_and_survives_jwks_outage(monkeypatch):
+    """Binding must fail closed when it cannot actually verify the token:
+    an empty audience (token-confusion) and an unreachable JWKS (OSError, not
+    ValueError) both cap to TLP:CLEAR instead of 500-ing into an open default."""
+    from src import oidc
+
+    priv, _jwks_unused = _rsa_keypair()
+    monkeypatch.setenv("OIDC_ISSUER", "https://idp/x")
+    monkeypatch.setenv("OIDC_BIND_CLEARANCE", "1")
+    token = _jwt(priv, payload={"tlp_clearance": "TLP:RED"})
+
+    # No audience configured: refuse to trust the claim.
+    monkeypatch.delenv("OIDC_AUDIENCE", raising=False)
+    assert oidc.bound_clearance(f"Bearer {token}", "TLP:RED") == "TLP:CLEAR"
+
+    # Audience present but JWKS unreachable: OSError must also fail closed.
+    monkeypatch.setenv("OIDC_AUDIENCE", "api")
+
+    def _boom(_issuer):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(oidc, "_jwks", _boom)
+    assert oidc.bound_clearance(f"Bearer {token}", "TLP:RED") == "TLP:CLEAR"
 
 
 # ---------------------------------------------------------------- RSS / Telegram parsing
@@ -518,6 +593,21 @@ def test_rate_limiter_memory_and_redis_stub():
     d = RateLimiter(1)
     d._client = _Down()
     assert d.allowed("k") is True and d.allowed("k") is False  # fail-open to memory
+
+
+def test_rate_limiter_memory_key_cap(monkeypatch):
+    """The in-process fallback must not grow without bound under key flood
+    (e.g. spoofed client IPs): hitting the cap evicts/reset instead of growing."""
+    from src import ratelimit
+    from src.ratelimit import RateLimiter
+
+    monkeypatch.setattr(ratelimit, "_MEMORY_MAX_KEYS", 10)
+    rl = RateLimiter(5, "")
+    for i in range(200):
+        rl.allowed(f"k{i}")
+    assert len(rl._memory) <= 10
+    # Namespaced keys keep read/write budgets independent (the middleware's fix).
+    assert rl.allowed("ro:rl:1.2.3.4") is True
 
 
 def test_engine_wrappers_unsigned():

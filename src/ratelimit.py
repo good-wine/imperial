@@ -19,6 +19,10 @@ log = logging.getLogger(__name__)
 
 _WINDOW_S = 60.0
 
+#: Cap on distinct keys held by the in-process fallback. The fallback is keyed
+#: per client IP; under IP spoofing the dict would otherwise grow without bound.
+_MEMORY_MAX_KEYS = 20_000
+
 
 class RateLimiter:
     """per_minute hits per key per rolling 60 s window."""
@@ -29,6 +33,7 @@ class RateLimiter:
         self._client: Any = None
         self._memory: dict[str, list[float]] = {}
         self._warned_at = 0.0
+        self._cap_warned_at = 0.0
 
     def _redis(self) -> Any:
         if self._client is None and self._redis_url:
@@ -76,9 +81,22 @@ class RateLimiter:
 
     def _allowed_memory(self, key: str) -> bool:
         now = time.time()
+        if len(self._memory) >= _MEMORY_MAX_KEYS:
+            # Bound memory under key flood (e.g. spoofed client IPs). Evict the
+            # oldest batch rather than scanning every key on every request: the
+            # scan would itself become the hot path exactly when it matters.
+            for k in list(self._memory)[: max(1, _MEMORY_MAX_KEYS // 10)]:
+                self._memory.pop(k, None)
+            self._warn_cap()
         hits = [h for h in self._memory.get(key, []) if now - h < _WINDOW_S]
         if len(hits) >= self.per_minute:
             return False
         hits.append(now)
         self._memory[key] = hits[-self.per_minute :]
         return True
+
+    def _warn_cap(self) -> None:
+        now = time.time()
+        if now - self._cap_warned_at > 60:
+            self._cap_warned_at = now
+            log.warning("ratelimit: in-process bucket key cap reached; evicting oldest")

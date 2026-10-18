@@ -78,6 +78,17 @@ def allows(requester: str, record: str) -> bool:
         return False
 
 
+def clamp_clearance(declared: str, allowed: str) -> str:
+    """Return the lower of two clearances — never escalates.
+
+    Used to cap a caller-supplied clearance by the clearance their identity
+    actually holds, so a self-declared `X-TLP` header cannot grant access the
+    token does not back.
+    """
+    d, a = normalize(declared), normalize(allowed)
+    return d if ORDER.index(d) <= ORDER.index(a) else a
+
+
 def redact(report: dict[str, Any], requester: str) -> dict[str, Any]:
     """Return a clearance-filtered copy of a report dict (non-mutating)."""
     visible = VISIBLE_FIELDS.get(normalize(requester), VISIBLE_FIELDS["TLP:RED"])
