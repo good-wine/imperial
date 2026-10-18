@@ -4,7 +4,7 @@ All notable changes to the Provenance Engine follow
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) versioning
 (`MAJOR.MINOR.PATCH` on `pyproject.toml`).
 
-## [4.5.0] - 2026-10-04
+## [4.5.0] - 2026-10-18
 
 ### Added
 - EU AI Act Art. 50 transparency assessment (`src/modules/ai_act50.py`):
@@ -57,6 +57,46 @@ All notable changes to the Provenance Engine follow
   determination (case-TLP-gated export paths).
 - The disclosure badge escapes interpolated text, uses per-label element ids
   and carries a border (visible on a dark page).
+- C2PA `digitalSourceType` matching is now host- and rename-agnostic (terminal
+  segment): `http://c2pa.org/...`, `http://cv.iptc.org/...` and the pre-/post-2.2
+  spellings resolve to the same family. The families cover the C2PA/IPTC
+  vocabulary (incl. `compositeSynthetic`, `compositeWithTrainedAlgorithmicMedia`,
+  `virtualRecording`, `algorithmicMedia`, `computationalCapture`, …), the walk
+  bound was raised, and an unrecognised value is reported `UNMARKED` — never a
+  false `HUMAN_DECLARED`. Ambiguous values (`composite`, retired `softwareImage`,
+  `empty`) are likewise not treated as human and are named as AI-agnostic (not
+  "unrecognised") in the evidence. A positive watermark now takes precedence over
+  a self-declared non-AI source type (a manifest could otherwise suppress marking
+  detection): the conflict is reported in the evidence instead of silently
+  resolving to `HUMAN_DECLARED`. Evidence and basis strings now name the real
+  source (declared `digitalSourceType` vs detected watermark) instead of claiming
+  the content "self-declares" AI when a watermark was detected.
+
+### Security
+- Optional TLP clearance binding to identity (`OIDC_BIND_CLEARANCE=1`, claim
+  `OIDC_TLP_CLAIM`, default `tlp_clearance`): a request's declared `X-TLP`
+  cannot exceed the bearer token's clearance and fails closed to `TLP:CLEAR`
+  without a valid token. An empty `OIDC_AUDIENCE` also fails closed (a token
+  minted for another service at the same issuer must not be accepted). Off by
+  default (callsign mode), so a self-declared clearance remains accepted only
+  on a trusted network. JWKS failures are negatively cached (30 s) so an IdP
+  blip cannot stall every request, and identity/clearance resolution fails
+  closed on *any* error, not only `ValueError`.
+- With `OIDC_ISSUER` set, a valid bearer is now **required**: the self-declared
+  `owner`/`X-Analyst`/form field is no longer accepted as identity (it was
+  written into the case owner and the audit trail unverified). Set
+  `OIDC_ALLOW_ANONYMOUS=1` only for a trusted single-user/lab deployment.
+- The API and dashboard ports are bound to loopback by default in
+  `docker-compose.yml` (`127.0.0.1:8000:8000`, `127.0.0.1:8501:8501`); reach
+  them through Caddy or the oauth2-proxy in front of the dashboard.
+- Read paths (`/api/v1/cases`, `/api/v1/export`, `/api/v1/federated`,
+  `/api/v1/search`) get their own rate budget (`API_RATE_LIMIT_READ_PER_MIN`,
+  default 240) with a namespaced counter, so a burst of compliance reads (each
+  writes an audit row) is bounded and cannot erode the ingestion budget.
+  `/api/v1/admin` now shares the ingestion (write) budget, and the in-process
+  limiter caps its key set (evicting oldest, amortised).
+- The analyst console accepts `DASHBOARD_API_BEARER` so it can read above
+  `TLP:CLEAR` when clearance binding is enabled.
 
 ## [4.4.0] - 2026-10-03
 
