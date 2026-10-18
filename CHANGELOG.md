@@ -4,6 +4,13 @@ All notable changes to the Provenance Engine follow
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) versioning
 (`MAJOR.MINOR.PATCH` on `pyproject.toml`).
 
+> **Status: alpha (pre-release).** This project is pre-1.0 and actively
+> developed; the entries below describe what changed, they are **not** a
+> stability promise. The report wire format (`REPORT_SCHEMA_VERSION`), the API
+> and the console can change between minor versions. See the
+> [Project status](README.md#project-status-alpha) section for what "alpha"
+> means concretely.
+
 ## [4.5.0] - 2026-10-18
 
 ### Added

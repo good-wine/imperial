@@ -1,15 +1,21 @@
 # Geopolitical Media Provenance & Verification Engine
 
+[![Status: alpha](https://img.shields.io/badge/status-alpha-orange.svg)](#project-status-alpha)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![Types: mypy](https://img.shields.io/badge/types-mypy-green.svg)](https://mypy-lang.org/)
 [![Commits: Conventional](https://img.shields.io/badge/commits-conventional-fe5196.svg)](https://www.conventionalcommits.org/)
 
-**Alpha research build** — interfaces and the report wire format
-(`REPORT_SCHEMA_VERSION`) can still change; review
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for measured decisions and the
-gaps that are known and not yet closed.
+> [!WARNING]
+> **This project is still an alpha (pre-release) and is not production-ready.**
+> It is an early, actively developed research build: interfaces, the report
+> wire format (`REPORT_SCHEMA_VERSION`), the REST API and the operator console
+> can change without notice, and there is no stability or support commitment
+> and no warranty ([Apache-2.0](LICENSE)). Do not deploy it on live casework
+> before an independent security and forensic validation; read
+> [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the gaps that are known
+> and deliberately not yet closed. See [Project status](#project-status-alpha).
 
 Offline-first intelligence platform for crisis-zone media: **C2PA crypto →
 multimodal forensics (video+audio+rPPG+lip-sync+MP4) → GEOINT solar/shadow →
@@ -146,6 +152,27 @@ sudo sh -c 'echo "127.0.0.1 imperial.local api.imperial.local app.imperial.local
 curl --resolve api.imperial.local:443:127.0.0.1 --cacert config/imperial-root.crt \
   https://api.imperial.local/health
 ```
+
+## Project status: alpha
+
+`pyproject.toml` declares `Development Status :: 3 - Alpha` and releases are
+published as **pre-releases**. Concretely, that means:
+
+- **Not production-ready.** No stability or support commitment, no warranty
+  ([Apache-2.0](LICENSE)).
+- **Surfaces can change between minor versions.** The report wire format
+  (`REPORT_SCHEMA_VERSION` in `src/schemas.py`), the REST API, the STIX/SIEM
+  exports and the analyst console are pre-1.0.
+- **What *is* enforced today** is the quality gate: `ruff` + `mypy` clean,
+  `bandit` + `pip-audit` clean, tests green with a coverage ratchet, and an
+  adversarial eval harness — see [CONTRIBUTING.md](CONTRIBUTING.md).
+- **Known gaps are recorded, not hidden**: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+  and [`docs/SECURITY.md`](docs/SECURITY.md) list the measured limits (marking
+  detection degrading to `UNMARKED`, requester-declared TLP by default, C2PA
+  extraction depth, and so on).
+
+The engine reports what it measured, with evidence, and degrades each leg to
+`SKIPPED` rather than guessing — verify a verdict before it informs a real case.
 
 ## Contributing, security and licence
 

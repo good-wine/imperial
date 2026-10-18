@@ -1,5 +1,10 @@
 # Architecture (v4) — data flow & service map
 
+> **Status: alpha (pre-release).** This document is the honest map of what the
+> engine does today, including the limits it has **not** closed. Treat every
+> "known gap" below as a live constraint, not a backlog item that is already
+> fixed. See the [Project status](../README.md#project-status-alpha) section.
+
 ```
                     ┌─────────────┐     multipart/TLP      ┌──────────────┐
                     │  Dashboard  │◄──────────────────────►│  FastAPI     │──┐
