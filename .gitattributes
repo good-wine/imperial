@@ -1,0 +1,29 @@
+# Normalize line endings: LF in the repository for every text file. Shell
+# scripts, Dockerfiles, YAML and Python all assume LF, and this keeps a
+# Windows checkout from turning CRLF into a runtime difference.
+* text=auto eol=lf
+
+# Windows-only files, if any are ever added, keep CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Never diff, merge or "fix" binary artifacts as text.
+*.onnx       binary
+*.onnx.data  binary
+*.pt         binary
+*.pt.sig     binary
+*.ckpt       binary
+*.png        binary
+*.jpg        binary
+*.jpeg       binary
+*.webp       binary
+*.gif        binary
+*.ico        binary
+*.pdf        binary
+*.zip        binary
+*.gz         binary
+*.sqlite3    binary
+
+# Generated: collapse in diffs and keep it out of the language statistics.
+requirements.lock linguist-generated=true
+reports/sbom*.json linguist-generated=true
