@@ -1,5 +1,23 @@
 # Security model
 
+## Reporting a vulnerability
+
+Do **not** open a public issue. Report privately through GitHub's advisory
+channel — **<https://github.com/good-wine/imperial/security/advisories/new>** —
+including: affected component/version, a minimal reproduction, and the impact
+you believe it has (a wrong TLP boundary, a redaction bypass, an evidence-
+integrity break and an RCE are all in scope).
+
+Please don't attach real case evidence or media you are not cleared to share;
+a synthetic reproduction or a hash is enough. Expect an acknowledgement within
+a few days. This is a research/alpha project with no bug-bounty programme;
+fixes are released as a `v*` tag with a CHANGELOG entry.
+
+Also see [`ARCHITECTURE.md`](ARCHITECTURE.md) for the **honest gaps** — some
+limits are known, measured and deliberately not yet closed; a report that
+restates one of those is still welcome, but the list is the fastest way to see
+whether the behaviour is intended.
+
 ## Trust boundaries
 Untrusted: uploaded media, filenames, EXIF/XMP, feed content, Telegram
 captions — all sanitized before LLM use (`_sanitize`, instruction-pattern
