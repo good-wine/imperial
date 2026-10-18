@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/good-wine/imperial/security/advisories/new
+    about: Report privately via the advisory channel — never in a public issue.
+  - name: Architecture, measured decisions and known gaps
+    url: https://github.com/good-wine/imperial/blob/main/docs/ARCHITECTURE.md
+    about: Read this before proposing a design change or filing a "missing feature".
+  - name: Trust boundaries and the TLP model
+    url: https://github.com/good-wine/imperial/blob/main/docs/SECURITY.md
+    about: How clearance, redaction and the audit chain actually behave.

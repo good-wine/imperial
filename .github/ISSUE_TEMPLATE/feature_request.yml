@@ -1,0 +1,71 @@
+name: Feature request
+description: Propose a capability, a new signal or a workflow improvement
+title: "[feat] "
+labels: ["enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before proposing, check [`docs/ARCHITECTURE.md`](https://github.com/good-wine/imperial/blob/main/docs/ARCHITECTURE.md)
+        — it lists the measured decisions and the **honest gaps** already known.
+        Some ideas are deliberately not built; the reasons are recorded there.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What can you not do today? Describe the analyst/case situation, not the solution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed capability
+      description: What should the engine do? Which output should change (verdict, report field, API, console)?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - C2PA / provenance
+        - Forensic vision (image/video/audio)
+        - GEOINT / context correlation
+        - Report / STIX / SIEM export
+        - EU AI Act Art. 50
+        - TLP / security / identity
+        - API / worker / persistence
+        - Dashboard (HITL console)
+        - Tooling / CI / docs
+    validations:
+      required: true
+
+  - type: textarea
+    id: offline
+    attributes:
+      label: Offline & fail-open constraints
+      description: |
+        The platform must run fully offline and every leg must degrade to
+        SKIPPED rather than fail the run. How does this proposal respect that?
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and this is not a duplicate
+          required: true
+        - label: This does not require a network service at analysis time
+          required: true

@@ -1,0 +1,80 @@
+name: Bug report
+description: Something is broken, or produces a wrong verdict
+title: "[bug] "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. This is a provenance/forensics tool: a **wrong
+        verdict** matters as much as a crash, so please say which output you got
+        and which you expected.
+
+        ⚠️ This tracker is public. Do **not** attach real case evidence, media
+        you are not cleared to share, credentials or `.env` contents. Hashes,
+        synthetic repros and redacted logs are welcome.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Observed behaviour, and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: The smallest commands that show it, from a clean checkout.
+      placeholder: |
+        make install
+        .venv/bin/python main.py path/to/synthetic.jpg
+      render: shell
+    validations:
+      required: true
+
+  - type: dropdown
+    id: mode
+    attributes:
+      label: How are you running it?
+      options:
+        - CLI (main.py)
+        - FastAPI (uvicorn main:app)
+        - Celery worker
+        - Docker Compose
+        - Streamlit console
+        - Tests
+    validations:
+      required: true
+
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      value: |
+        - OS:
+        - Python (`.venv/bin/python -V`):
+        - Model weights provisioned? (`make verify-weights`):
+        - Relevant `.env` knobs (never paste secrets):
+    validations:
+      required: true
+
+  - type: textarea
+    id: gate
+    attributes:
+      label: Quality gate output
+      description: Paste `make gate`, or the failing step. Redacted is fine.
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and this is not a duplicate
+          required: true
+        - label: This report contains no real case evidence, credentials or secrets
+          required: true

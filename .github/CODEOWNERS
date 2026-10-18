@@ -1,0 +1,14 @@
+# Default owner for everything in the repository.
+*                                   @good-wine
+
+# Sensitive surfaces: a change here should get an explicit review, because a
+# mistake is a security or evidence-integrity regression, not just a bug.
+/.github/                           @good-wine
+/src/tlp.py                         @good-wine
+/src/oidc.py                        @good-wine
+/src/audit.py                       @good-wine
+/src/schemas.py                     @good-wine
+/security/                          @good-wine
+/rust/provenance-jumbf/             @good-wine
+/docs/SECURITY.md                   @good-wine
+/docs/ARCHITECTURE.md               @good-wine

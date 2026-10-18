@@ -1,0 +1,54 @@
+# Dependency updates. Alert-based security fixes are a separate, always-on
+# setting (see repo Security settings); this file drives *version* update PRs.
+version: 2
+
+updates:
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      # One PR for routine bumps; majors arrive separately so they can be
+      # reviewed against the frozen wire format and the model registry.
+      python-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      # Torch is pinned deliberately (CPU index URL, 30+ min rebuilds).
+      - dependency-name: torch
+      - dependency-name: torchvision
+      - dependency-name: torchaudio
+
+  - package-ecosystem: cargo
+    directory: "/rust/provenance-jumbf"
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      rust:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "ci(deps)"
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "chore(deps)"
