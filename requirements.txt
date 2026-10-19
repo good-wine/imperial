@@ -47,7 +47,7 @@ qdrant-client>=1.11
 
 # Dashboard (dashboard target only)
 streamlit>=1.33
-requests>=2.31
+requests>=2.34.2
 
 # Dev / test / eval
 pytest>=8.0
