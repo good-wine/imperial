@@ -19,7 +19,7 @@ pydantic>=2.0
 pydantic-settings>=2.0
 
 # C2PA SOTA fallback: manifest CBOR decode + X.509 inspection (both optional)
-cbor2>=5.6
+cbor2>=6.1.5
 cryptography>=42.0
 
 # C2PA official verification (real chain validation; graceful fallback offline)
