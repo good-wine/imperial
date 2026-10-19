@@ -55,7 +55,7 @@ dev = [
   "pytest-cov>=5.0",
   "ruff>=0.8",
   "mypy>=1.10",
-  "bandit>=1.7",
+  "bandit>=1.9.4",
   "pre-commit>=3.0",
 ]
 docs = []
