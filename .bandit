@@ -1,0 +1,10 @@
+# Bandit native config (bandit does not read pyproject.toml skips).
+# Mirrors [tool.bandit] in pyproject.toml — keep the two in sync.
+# Rationale (see docs/SECURITY.md):
+#  - B101 asserts live in tests/ only.
+#  - B108/B110/B112 are the pipeline's fail-open contract: every engine leg
+#    degrades to SKIPPED with a logged reason instead of aborting analysis.
+#  - B310 residuals carry inline `# nosec` at the single choke point
+#    (src/security.fetch_url: scheme allowlist + size cap).
+skips: [B101, B108, B110, B112]
+exclude_dirs: [.venv, rust]
